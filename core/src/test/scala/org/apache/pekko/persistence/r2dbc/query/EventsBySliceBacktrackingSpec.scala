@@ -29,7 +29,9 @@ import pekko.persistence.r2dbc.QuerySettings
 import pekko.persistence.r2dbc.TestConfig
 import pekko.persistence.r2dbc.TestData
 import pekko.persistence.r2dbc.TestDbLifecycle
+import pekko.persistence.r2dbc.internal.EnvelopeOrigin
 import pekko.persistence.r2dbc.internal.Sql.DialectInterpolation
+import pekko.persistence.r2dbc.internal.InstantFactory
 import pekko.persistence.r2dbc.query.scaladsl.R2dbcReadJournal
 import pekko.persistence.typed.PersistenceId
 import pekko.serialization.SerializationExtension
@@ -98,7 +100,7 @@ class EventsBySliceBacktrackingSpec
       val sinkProbe = TestSink[EventEnvelope[String]]()(system.classicSystem)
 
       // don't let behind-current-time be a reason for not finding events
-      val startTime = Instant.now().minusSeconds(10 * 60)
+      val startTime = InstantFactory.now().minusSeconds(10 * 60)
 
       writeEvent(slice1, pid1, 1L, startTime, "e1-1")
       writeEvent(slice1, pid1, 2L, startTime.plusMillis(1), "e1-2")
@@ -113,17 +115,20 @@ class EventsBySliceBacktrackingSpec
       env1.persistenceId shouldBe pid1
       env1.sequenceNr shouldBe 1L
       env1.eventOption shouldBe Some("e1-1")
+      env1.source shouldBe EnvelopeOrigin.SourceQuery
 
       val env2 = result.expectNext()
       env2.persistenceId shouldBe pid1
       env2.sequenceNr shouldBe 2L
       env2.eventOption shouldBe Some("e1-2")
+      env2.source shouldBe EnvelopeOrigin.SourceQuery
 
       // first backtracking query kicks in immediately after the first normal query has finished
       // and it also emits duplicates (by design)
       val env3 = result.expectNext()
       env3.persistenceId shouldBe pid1
       env3.sequenceNr shouldBe 1L
+      env3.source shouldBe EnvelopeOrigin.SourceBacktracking
       // event payload isn't included in backtracking results
       env3.eventOption shouldBe None
       // but it can be lazy loaded
@@ -182,7 +187,7 @@ class EventsBySliceBacktrackingSpec
       val sinkProbe = TestSink[EventEnvelope[String]]()(system.classicSystem)
 
       // don't let behind-current-time be a reason for not finding events
-      val startTime = Instant.now().minusSeconds(10 * 60)
+      val startTime = InstantFactory.now().minusSeconds(10 * 60)
 
       writeEvent(slice1, pid1, 1L, startTime, "e1-1")
       writeEvent(slice1, pid1, 2L, startTime.plusMillis(2), "e1-2")
