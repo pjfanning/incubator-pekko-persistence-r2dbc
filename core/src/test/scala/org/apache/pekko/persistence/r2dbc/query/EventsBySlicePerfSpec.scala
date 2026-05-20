@@ -1,14 +1,5 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.query
@@ -18,20 +9,18 @@ import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
-import org.apache.pekko
 import pekko.Done
 import pekko.actor.testkit.typed.scaladsl.LogCapturing
 import pekko.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
 import pekko.actor.typed.ActorSystem
 import pekko.persistence.query.NoOffset
 import pekko.persistence.query.PersistenceQuery
+import pekko.persistence.query.TimestampOffset
 import pekko.persistence.r2dbc.TestActors
 import pekko.persistence.r2dbc.TestActors.Persister.Persist
-import pekko.persistence.r2dbc.TestActors.Persister.PersistWithAck
 import pekko.persistence.r2dbc.TestConfig
 import pekko.persistence.r2dbc.TestData
 import pekko.persistence.r2dbc.TestDbLifecycle
-import pekko.persistence.r2dbc.QuerySettings
 import pekko.persistence.r2dbc.internal.EnvelopeOrigin
 import pekko.persistence.r2dbc.query.scaladsl.R2dbcReadJournal
 import pekko.stream.scaladsl.Sink
@@ -42,12 +31,14 @@ import org.scalatest.wordspec.AnyWordSpecLike
 object EventsBySlicePerfSpec {
   private val config = ConfigFactory
     .parseString("""
-    pekko.persistence.r2dbc.journal.publish-events = on
-    pekko.persistence.r2dbc.query {
+    akka.persistence.r2dbc.journal.publish-events = on
+    akka.persistence.r2dbc.query {
       backtracking.enabled = on
       refresh-interval = 3s
       #buffer-size = 100
     }
+    # to measure lag latency more accurately
+    akka.persistence.r2dbc.use-app-timestamp = true
     """)
     .withFallback(TestConfig.config)
 
@@ -66,10 +57,7 @@ class EventsBySlicePerfSpec
 
   private val query = PersistenceQuery(testKit.system).readJournalFor[R2dbcReadJournal](R2dbcReadJournal.Identifier)
 
-  private lazy val r2dbcQuerySettings =
-    QuerySettings(testKit.system.settings.config.getConfig("pekko.persistence.r2dbc.query"))
-
-  "EventsBySlices performance" should {
+  s"EventsBySlices performance" should {
 
     "retrieve from several slices" in {
       // increase these properties for "real" testing
@@ -122,7 +110,7 @@ class EventsBySlicePerfSpec
               if (EnvelopeOrigin.fromQuery(env)) {
                 if (acc > 0 && acc % 100 == 0)
                   println(s"#$iteration Reading [$acc] events from slices [${range.min}-${range.max}] " +
-                    s"took [${(System.nanoTime() - t1) / 1000 / 1000}] ms")
+                  s"took [${(System.nanoTime() - t1) / 1000 / 1000}] ms")
                 acc + 1
               } else {
                 acc
@@ -180,9 +168,10 @@ class EventsBySlicePerfSpec
                 val lagMillis = System.currentTimeMillis() - env.timestamp
                 val delayed =
                   (EnvelopeOrigin.fromPubSub(env) && lagMillis > 50) ||
-                  (EnvelopeOrigin.fromQuery(env) && lagMillis > r2dbcQuerySettings.refreshInterval.toMillis + 300) ||
+                  (EnvelopeOrigin.fromQuery(
+                    env) && lagMillis > r2dbcSettings.querySettings.refreshInterval.toMillis + 300) ||
                   (EnvelopeOrigin.fromPubSub(
-                    env) && lagMillis > r2dbcQuerySettings.backtrackingWindow.toMillis / 2 + 300)
+                    env) && lagMillis > r2dbcSettings.querySettings.backtrackingWindow.toMillis / 2 + 300)
                 if (delayed)
                   println(
                     s"# received ${newAcc.size}$duplicate from ${env.source}: ${env.persistenceId} seqNr ${env.sequenceNr}, lag $lagMillis ms")
@@ -190,7 +179,7 @@ class EventsBySlicePerfSpec
 
               if (newAcc.size != acc.size && (newAcc.size % 100 == 0))
                 println(s"#$iteration Reading [${newAcc.size}] events " +
-                  s"took [${(System.nanoTime() - t0) / 1000 / 1000}] ms")
+                s"took [${(System.nanoTime() - t0) / 1000 / 1000}] ms")
               newAcc
 
             }

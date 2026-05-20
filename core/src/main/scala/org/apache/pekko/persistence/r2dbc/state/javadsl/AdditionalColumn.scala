@@ -8,12 +8,11 @@
  */
 
 /*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.state.javadsl
 
-import org.apache.pekko
 import pekko.annotation.ApiMayChange
 import pekko.annotation.InternalApi
 
@@ -32,17 +31,17 @@ object AdditionalColumn {
   /**
    * INTERNAL API
    */
-  @InternalApi private[pekko] final class BindValue[B](val value: B) extends Binding[B]
+  @InternalApi private[akka] final class BindValue[B](val value: B) extends Binding[B]
 
   /**
    * INTERNAL API
    */
-  @InternalApi private[pekko] case object BindNull extends Binding[Nothing]
+  @InternalApi private[akka] case object BindNull extends Binding[Nothing]
 
   /**
    * INTERNAL API
    */
-  @InternalApi private[pekko] case object Skip extends Binding[Nothing]
+  @InternalApi private[akka] case object Skip extends Binding[Nothing]
 
 }
 

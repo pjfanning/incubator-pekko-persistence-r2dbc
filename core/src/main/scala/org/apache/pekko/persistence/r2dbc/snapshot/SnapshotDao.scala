@@ -8,29 +8,26 @@
  */
 
 /*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.snapshot
 
-import scala.concurrent.{ ExecutionContext, Future }
+import scala.concurrent.ExecutionContext
+import scala.concurrent.Future
 
-import org.apache.pekko
 import pekko.actor.typed.ActorSystem
 import pekko.annotation.InternalApi
+import pekko.dispatch.ExecutionContexts
 import pekko.persistence.Persistence
 import pekko.persistence.SnapshotSelectionCriteria
-import pekko.persistence.r2dbc.ConnectionFactoryProvider
-import pekko.persistence.r2dbc.Dialect
-import pekko.persistence.r2dbc.SnapshotSettings
+import pekko.persistence.r2dbc.R2dbcSettings
 import pekko.persistence.r2dbc.internal.PayloadCodec
 import pekko.persistence.r2dbc.internal.PayloadCodec.RichRow
 import pekko.persistence.r2dbc.internal.PayloadCodec.RichStatement
+import pekko.persistence.r2dbc.internal.Sql.Interpolation
 import pekko.persistence.r2dbc.internal.R2dbcExecutor
-import pekko.persistence.r2dbc.internal.Sql.DialectInterpolation
-import pekko.persistence.r2dbc.snapshot.mysql.MySQLSnapshotDao
 import pekko.persistence.typed.PersistenceId
-import com.typesafe.config.Config
 import io.r2dbc.spi.ConnectionFactory
 import io.r2dbc.spi.Row
 import org.slf4j.Logger
@@ -53,19 +50,6 @@ private[r2dbc] object SnapshotDao {
 
   final case class SerializedSnapshotMetadata(payload: Array[Byte], serializerId: Int, serializerManifest: String)
 
-  def fromConfig(
-      settings: SnapshotSettings,
-      config: Config
-  )(implicit system: ActorSystem[_], ec: ExecutionContext): SnapshotDao = {
-    val connectionFactory =
-      ConnectionFactoryProvider(system).connectionFactoryFor(settings.useConnectionFactory, config)
-    settings.dialect match {
-      case Dialect.Postgres | Dialect.Yugabyte =>
-        new SnapshotDao(settings, connectionFactory)
-      case Dialect.MySQL =>
-        new MySQLSnapshotDao(settings, connectionFactory)
-    }
-  }
 }
 
 /**
@@ -74,38 +58,18 @@ private[r2dbc] object SnapshotDao {
  * Class for doing db interaction outside of an actor to avoid mistakes in future callbacks
  */
 @InternalApi
-private[r2dbc] class SnapshotDao(settings: SnapshotSettings, connectionFactory: ConnectionFactory)(
+private[r2dbc] final class SnapshotDao(settings: R2dbcSettings, connectionFactory: ConnectionFactory)(
     implicit
     ec: ExecutionContext,
     system: ActorSystem[_]) {
   import SnapshotDao._
 
-  implicit protected val dialect: Dialect = settings.dialect
-
-  protected val snapshotTable: String = settings.snapshotsTableWithSchema
+  private val snapshotTable = settings.snapshotsTableWithSchema
+  private implicit val snapshotPayloadCodec: PayloadCodec = settings.snapshotPayloadCodec
   private val persistenceExt = Persistence(system)
   private val r2dbcExecutor = new R2dbcExecutor(connectionFactory, log, settings.logDbCallsExceeding)(ec, system)
-  protected implicit val snapshotPayloadCodec: PayloadCodec = settings.snapshotPayloadCodec
 
-  private def collectSerializedSnapshot(row: Row): SerializedSnapshotRow =
-    SerializedSnapshotRow(
-      row.get("persistence_id", classOf[String]),
-      row.get[java.lang.Long]("seq_nr", classOf[java.lang.Long]),
-      row.get[java.lang.Long]("write_timestamp", classOf[java.lang.Long]),
-      row.getPayload("snapshot"),
-      row.get[Integer]("ser_id", classOf[Integer]),
-      row.get("ser_manifest", classOf[String]), {
-        val metaSerializerId = row.get[Integer]("meta_ser_id", classOf[Integer])
-        if (metaSerializerId eq null) None
-        else
-          Some(
-            SerializedSnapshotMetadata(
-              row.get("meta_payload", classOf[Array[Byte]]),
-              metaSerializerId,
-              row.get("meta_ser_manifest", classOf[String])))
-      })
-
-  protected val upsertSql = sql"""
+  private val upsertSql = sql"""
     INSERT INTO $snapshotTable
     (slice, entity_type, persistence_id, seq_nr, write_timestamp, snapshot, ser_id, ser_manifest, meta_payload, meta_ser_id, meta_ser_manifest)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -168,6 +132,24 @@ private[r2dbc] class SnapshotDao(settings: SnapshotSettings, connectionFactory: 
       $maxSeqNrCondition $minSeqNrCondition $maxTimestampCondition $minTimestampCondition"""
   }
 
+  private def collectSerializedSnapshot(row: Row): SerializedSnapshotRow =
+    SerializedSnapshotRow(
+      row.get("persistence_id", classOf[String]),
+      row.get[java.lang.Long]("seq_nr", classOf[java.lang.Long]),
+      row.get[java.lang.Long]("write_timestamp", classOf[java.lang.Long]),
+      row.getPayload("snapshot"),
+      row.get[Integer]("ser_id", classOf[Integer]),
+      row.get("ser_manifest", classOf[String]), {
+        val metaSerializerId = row.get("meta_ser_id", classOf[Integer])
+        if (metaSerializerId eq null) None
+        else
+          Some(
+            SerializedSnapshotMetadata(
+              row.get("meta_payload", classOf[Array[Byte]]),
+              metaSerializerId,
+              row.get("meta_ser_manifest", classOf[String])))
+      })
+
   def load(persistenceId: String, criteria: SnapshotSelectionCriteria): Future[Option[SerializedSnapshotRow]] = {
     r2dbcExecutor
       .select(s"select snapshot [$persistenceId], criteria: [$criteria]")(
@@ -196,7 +178,7 @@ private[r2dbc] class SnapshotDao(settings: SnapshotSettings, connectionFactory: 
           statement
         },
         collectSerializedSnapshot)
-      .map(_.headOption)(ExecutionContext.parasitic)
+      .map(_.headOption)(ExecutionContexts.parasitic)
 
   }
 
@@ -234,13 +216,10 @@ private[r2dbc] class SnapshotDao(settings: SnapshotSettings, connectionFactory: 
 
           statement
       }
-      .map(_ => ())(ExecutionContext.parasitic)
+      .map(_ => ())(ExecutionContexts.parasitic)
   }
 
   def delete(persistenceId: String, criteria: SnapshotSelectionCriteria): Future[Unit] = {
-    val entityType = PersistenceId.extractEntityType(persistenceId)
-    val slice = persistenceExt.sliceForPersistenceId(persistenceId)
-
     r2dbcExecutor.updateOne(s"delete snapshot [$persistenceId], criteria [$criteria]") { connection =>
       val statement = connection
         .createStatement(deleteSql(criteria))
@@ -265,6 +244,6 @@ private[r2dbc] class SnapshotDao(settings: SnapshotSettings, connectionFactory: 
       }
       statement
     }
-  }.map(_ => ())(ExecutionContext.parasitic)
+  }.map(_ => ())(ExecutionContexts.parasitic)
 
 }

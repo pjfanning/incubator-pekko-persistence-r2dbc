@@ -1,25 +1,16 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.journal
 
 import scala.concurrent.duration._
-import org.apache.pekko
+
 import pekko.Done
 import pekko.actor.testkit.typed.scaladsl.LogCapturing
 import pekko.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
 import pekko.actor.typed.ActorSystem
-import pekko.persistence.r2dbc.JournalSettings
+import pekko.persistence.r2dbc.R2dbcSettings
 import pekko.persistence.r2dbc.TestActors.Persister
 import pekko.persistence.r2dbc.TestConfig
 import pekko.persistence.r2dbc.TestData
@@ -35,22 +26,11 @@ class PersistTagsSpec
     with LogCapturing {
 
   override def typedSystem: ActorSystem[_] = system
-  private val settings = JournalSettings(system.settings.config.getConfig("pekko.persistence.r2dbc.journal"))
+  private val settings = new R2dbcSettings(system.settings.config.getConfig("akka.persistence.r2dbc"))
 
   case class Row(pid: String, seqNr: Long, tags: Set[String])
 
-  private lazy val dialect = system.settings.config.getString("pekko.persistence.r2dbc.journal.dialect")
-
-  private lazy val testEnabled: Boolean = {
-    // tags are not implemented for MySQL
-    dialect != "mysql"
-  }
-
   "Persist tags" should {
-    if (!testEnabled) {
-      info(s"PersistTagsSpec not enabled for $dialect")
-      pending
-    }
 
     "be the same for events stored in same transaction" in {
       val numberOfEntities = 9

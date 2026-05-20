@@ -1,31 +1,24 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.query
 
-import java.time.Instant
 import java.time.{ Duration => JDuration }
+
+import scala.collection.immutable
+import java.time.Instant
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
-import org.apache.pekko
 import pekko.Done
 import pekko.actor.testkit.typed.scaladsl.LogCapturing
 import pekko.actor.testkit.typed.scaladsl.LoggingTestKit
 import pekko.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
 import pekko.actor.typed.ActorSystem
 import pekko.actor.typed.internal.pubsub.TopicImpl
+import pekko.persistence.Persistence
 import pekko.persistence.query.NoOffset
 import pekko.persistence.query.PersistenceQuery
 import pekko.persistence.query.TimestampOffset
@@ -38,6 +31,7 @@ import pekko.persistence.r2dbc.TestConfig
 import pekko.persistence.r2dbc.TestData
 import pekko.persistence.r2dbc.TestDbLifecycle
 import pekko.persistence.r2dbc.internal.EnvelopeOrigin
+import pekko.persistence.r2dbc.internal.InstantFactory
 import pekko.persistence.r2dbc.internal.PubSub
 import pekko.persistence.r2dbc.query.scaladsl.R2dbcReadJournal
 import pekko.persistence.typed.PersistenceId
@@ -53,24 +47,22 @@ import com.typesafe.config.ConfigFactory
 import org.scalatest.wordspec.AnyWordSpecLike
 
 object EventsBySlicePubSubSpec {
-  def config: Config =
-    ConfigFactory.load(
-      ConfigFactory
-        .parseString("""
-    pekko.persistence.r2dbc {
+  def config: Config = ConfigFactory
+    .parseString("""
+    akka.persistence.r2dbc {
       journal.publish-events = on
+      #journal.publish-events-number-of-topics = 4
       journal.publish-events-dynamic {
         throughput-threshold = 50
         throughput-collect-interval = 1 second
       }
 
       # no events from database query, only via pub-sub
-      behind-current-time = 5 minutes
+      query.behind-current-time = 5 minutes
     }
-    pekko.actor.testkit.typed.filter-leeway = 20.seconds
+    akka.actor.testkit.typed.filter-leeway = 20.seconds
     """)
-        .withFallback(TestConfig.backtrackingDisabledConfig.withFallback(TestConfig.unresolvedConfig))
-    )
+    .withFallback(TestConfig.backtrackingDisabledConfig.withFallback(TestConfig.config))
 }
 
 class EventsBySlicePubSubSpec
@@ -85,12 +77,12 @@ class EventsBySlicePubSubSpec
   private val query = PersistenceQuery(testKit.system).readJournalFor[R2dbcReadJournal](R2dbcReadJournal.Identifier)
 
   private class Setup {
-    val setupEntityType = nextEntityType()
-    val persistenceId = nextPid(setupEntityType)
+    val entityType = nextEntityType()
+    val persistenceId = nextPid(entityType)
     val slice = query.sliceForPersistenceId(persistenceId)
     val persister = spawn(TestActors.Persister(persistenceId))
     val probe = createTestProbe[Done]()
-    val sinkProbe = TestSink[EventEnvelope[String]]()(system.classicSystem)
+    val sinkProbe = TestSink.probe[EventEnvelope[String]](system.classicSystem)
   }
 
   private def createEnvelope(
@@ -120,7 +112,7 @@ class EventsBySlicePubSubSpec
       env.eventMetadata,
       env.entityType,
       env.slice,
-      filtered = false,
+      env.filtered,
       source = EnvelopeOrigin.SourceBacktracking)
 
   private val entityType = nextEntityType()
@@ -133,18 +125,16 @@ class EventsBySlicePubSubSpec
   private val envB1 = createEnvelope(pidB, 1L, "b1", now.plusMillis(3))
   private val envB2 = createEnvelope(pidB, 2L, "b2", now.plusMillis(4))
 
-  "EventsBySlices pub-sub" should {
+  s"EventsBySlices pub-sub" should {
 
     "publish new events" in new Setup {
-      system.settings.config.getBoolean("pekko.persistence.r2dbc.journal.publish-events") shouldBe true
-      system.settings.config.getBoolean("pekko.persistence.r2dbc.query.publish-events") shouldBe true
 
       val result: TestSubscriber.Probe[EventEnvelope[String]] =
-        query.eventsBySlices[String](setupEntityType, slice, slice, NoOffset).runWith(sinkProbe).request(10)
+        query.eventsBySlices[String](this.entityType, slice, slice, NoOffset).runWith(sinkProbe).request(10)
 
       val topicStatsProbe = createTestProbe[TopicImpl.TopicStats]()
       eventually {
-        PubSub(typedSystem).eventTopic[String](setupEntityType, slice) ! TopicImpl.GetTopicStats(topicStatsProbe.ref)
+        PubSub(typedSystem).eventTopic[String](this.entityType, slice) ! TopicImpl.GetTopicStats(topicStatsProbe.ref)
         topicStatsProbe.receiveMessage().localSubscriberCount shouldBe 1
       }
 
@@ -207,13 +197,12 @@ class EventsBySlicePubSubSpec
     }
 
     "skipPubSubTooFarAhead" in {
-      val backtrackingWindow = JDuration.ofMillis(querySettings.backtrackingWindow.toMillis)
       val (in, out) =
         TestSource[EventEnvelope[String]]()
           .via(
             query.skipPubSubTooFarAhead(
               enabled = true,
-              maxAheadOfBacktracking = backtrackingWindow))
+              maxAheadOfBacktracking = JDuration.ofMillis(r2dbcSettings.querySettings.backtrackingWindow.toMillis)))
           .toMat(TestSink[EventEnvelope[String]]())(Keep.both)
           .run()
       out.request(100)
@@ -233,7 +222,7 @@ class EventsBySlicePubSubSpec
       val time2 = envA1.offset
         .asInstanceOf[TimestampOffset]
         .timestamp
-        .plusMillis(backtrackingWindow.toMillis)
+        .plusMillis(r2dbcSettings.querySettings.backtrackingWindow.toMillis)
       val envC1 = createEnvelope(pidC, 1L, "c1", time2.plusMillis(1))
       val envC2 = createEnvelope(pidC, 2L, "c2", time2.plusMillis(2))
       in.sendNext(envC1)
@@ -252,13 +241,13 @@ class EventsBySlicePubSubSpec
       val consumerProbe = createTestProbe[EventEnvelope[String]]()
 
       query
-        .eventsBySlices[String](setupEntityType, slice, slice, NoOffset)
+        .eventsBySlices[String](this.entityType, slice, slice, NoOffset)
         .runWith(
           Sink.actorRef(consumerProbe.ref.toClassic, onCompleteMessage = "done", onFailureMessage = _.getMessage))
 
       val topicStatsProbe = createTestProbe[TopicImpl.TopicStats]()
       eventually {
-        PubSub(typedSystem).eventTopic[String](setupEntityType, slice) ! TopicImpl.GetTopicStats(topicStatsProbe.ref)
+        PubSub(typedSystem).eventTopic[String](this.entityType, slice) ! TopicImpl.GetTopicStats(topicStatsProbe.ref)
         topicStatsProbe.receiveMessage().localSubscriberCount shouldBe 1
       }
 
@@ -303,6 +292,41 @@ class EventsBySlicePubSubSpec
         Await.result(done2, 20.seconds)
       }
 
+    }
+
+    "group slices into topics" in new Setup {
+
+      val numberOfTopics =
+        typedSystem.settings.config.getInt("akka.persistence.r2dbc.journal.publish-events-number-of-topics")
+      //
+      val querySliceRanges = Persistence(typedSystem).sliceRanges(numberOfTopics * 2)
+      val queries: immutable.IndexedSeq[TestSubscriber.Probe[EventEnvelope[String]]] = {
+        querySliceRanges.map { range =>
+          query.eventsBySlices[String](this.entityType, range.min, range.max, NoOffset).runWith(sinkProbe).request(100)
+        }
+      }
+
+      val topicStatsProbe = createTestProbe[TopicImpl.TopicStats]()
+      eventually {
+        (0 until 1024).foreach { i =>
+          withClue(s"slice $i: ") {
+            PubSub(typedSystem).eventTopic[String](this.entityType, i) ! TopicImpl.GetTopicStats(topicStatsProbe.ref)
+            topicStatsProbe.receiveMessage().localSubscriberCount shouldBe 2
+          }
+        }
+      }
+
+      for (i <- 1 to 10) {
+        persister ! PersistWithAck(s"e-$i", probe.ref)
+        probe.expectMessage(Done)
+      }
+
+      for (i <- 1 to 10) {
+        val queryIndex = querySliceRanges.indexOf(querySliceRanges.find(_.contains(slice)).get)
+        queries(queryIndex).expectNext().event shouldBe s"e-$i"
+      }
+
+      queries.foreach(_.cancel())
     }
 
   }

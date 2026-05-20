@@ -8,7 +8,7 @@
  */
 
 /*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc
@@ -17,15 +17,125 @@ import java.util.Locale
 
 import scala.collection.immutable
 import scala.concurrent.duration._
-import scala.jdk.CollectionConverters._
-import scala.jdk.DurationConverters._
 
-import org.apache.pekko
 import pekko.annotation.InternalApi
 import pekko.annotation.InternalStableApi
 import pekko.persistence.r2dbc.internal.PayloadCodec
-import pekko.util.Helpers.toRootLowerCase
+import pekko.util.JavaDurationConverters._
 import com.typesafe.config.Config
+import pekko.util.Helpers.toRootLowerCase
+
+/**
+ * INTERNAL API
+ */
+@InternalStableApi
+object R2dbcSettings {
+  def apply(config: Config): R2dbcSettings =
+    new R2dbcSettings(config)
+}
+
+/**
+ * INTERNAL API
+ */
+@InternalStableApi
+final class R2dbcSettings(config: Config) {
+  val schema: Option[String] = Option(config.getString("schema")).filterNot(_.trim.isEmpty)
+
+  val journalTable: String = config.getString("journal.table")
+  val journalTableWithSchema: String = schema.map(_ + ".").getOrElse("") + journalTable
+
+  private def useJsonPayload(prefix: String) = config.getString(s"$prefix.payload-column-type").toUpperCase match {
+    case "BYTEA"          => false
+    case "JSONB" | "JSON" => true
+    case t                =>
+      throw new IllegalStateException(
+        s"Expected akka.persistence.r2dbc.$prefix.payload-column-type to be one of 'BYTEA', 'JSON' or 'JSONB' but found '$t'")
+  }
+  val journalPayloadCodec: PayloadCodec =
+    if (useJsonPayload("journal")) PayloadCodec.JsonCodec else PayloadCodec.ByteArrayCodec
+
+  val journalPublishEvents: Boolean = config.getBoolean("journal.publish-events")
+
+  val snapshotsTable: String = config.getString("snapshot.table")
+  val snapshotsTableWithSchema: String = schema.map(_ + ".").getOrElse("") + snapshotsTable
+
+  val snapshotPayloadCodec: PayloadCodec =
+    if (useJsonPayload("snapshot")) PayloadCodec.JsonCodec else PayloadCodec.ByteArrayCodec
+
+  val durableStateTable: String = config.getString("state.table")
+  val durableStateTableWithSchema: String = schema.map(_ + ".").getOrElse("") + durableStateTable
+
+  val durableStatePayloadCodec: PayloadCodec =
+    if (useJsonPayload("state")) PayloadCodec.JsonCodec else PayloadCodec.ByteArrayCodec
+
+  private val durableStateTableByEntityType: Map[String, String] =
+    configToMap(config.getConfig("state.custom-table"))
+
+  /**
+   * INTERNAL API
+   */
+  @InternalApi private[akka] val durableStateTableByEntityTypeWithSchema: Map[String, String] =
+    durableStateTableByEntityType.map { case (entityType, table) =>
+      entityType -> (schema.map(_ + ".").getOrElse("") + table)
+    }
+
+  def getDurableStateTable(entityType: String): String =
+    durableStateTableByEntityType.getOrElse(entityType, durableStateTable)
+
+  def getDurableStateTableWithSchema(entityType: String): String =
+    durableStateTableByEntityTypeWithSchema.getOrElse(entityType, durableStateTableWithSchema)
+
+  private def configToMap(cfg: Config): Map[String, String] = {
+    import pekko.util.ccompat.JavaConverters._
+    cfg.root.unwrapped.asScala.toMap.map { case (k, v) => k -> v.toString }
+  }
+
+  /**
+   * INTERNAL API
+   */
+  @InternalApi private[akka] val durableStateAdditionalColumnClasses: Map[String, immutable.IndexedSeq[String]] = {
+    import pekko.util.ccompat.JavaConverters._
+    val cfg = config.getConfig("state.additional-columns")
+    cfg.root.unwrapped.asScala.toMap.map {
+      case (k, v: java.util.List[_]) => k -> v.iterator.asScala.map(_.toString).toVector
+      case (k, v)                    => k -> Vector(v.toString)
+    }
+  }
+
+  /**
+   * INTERNAL API
+   */
+  @InternalApi private[akka] val durableStateChangeHandlerClasses: Map[String, String] =
+    configToMap(config.getConfig("state.change-handler"))
+
+  val durableStateAssertSingleWriter: Boolean = config.getBoolean("state.assert-single-writer")
+
+  val dialect: Dialect = toRootLowerCase(config.getString("dialect")) match {
+    case "yugabyte" => Dialect.Yugabyte
+    case "postgres" => Dialect.Postgres
+    case other      =>
+      throw new IllegalArgumentException(s"Unknown dialect [$other]. Supported dialects are [yugabyte, postgres].")
+  }
+
+  val querySettings = new QuerySettings(config.getConfig("query"))
+
+  val connectionFactorySettings = new ConnectionFactorySettings(config.getConfig("connection-factory"))
+
+  val dbTimestampMonotonicIncreasing: Boolean = config.getBoolean("db-timestamp-monotonic-increasing")
+
+  /**
+   * INTERNAL API FIXME remove when https://github.com/yugabyte/yugabyte-db/issues/10995 has been resolved
+   */
+  @InternalApi private[akka] val useAppTimestamp: Boolean = config.getBoolean("use-app-timestamp")
+
+  val logDbCallsExceeding: FiniteDuration =
+    config.getString("log-db-calls-exceeding").toLowerCase(Locale.ROOT) match {
+      case "off" => -1.millis
+      case _     => config.getDuration("log-db-calls-exceeding").asScala
+    }
+
+  val cleanupSettings = new CleanupSettings(config.getConfig("cleanup"))
+}
 
 /**
  * INTERNAL API
@@ -40,258 +150,21 @@ sealed trait Dialect
 object Dialect {
   case object Postgres extends Dialect
   case object Yugabyte extends Dialect
-
-  /** @since 1.1.0 */
-  case object MySQL extends Dialect
-
-  /** @since 1.1.0 */
-  def fromString(value: String): Dialect = {
-    toRootLowerCase(value) match {
-      case "yugabyte" => Dialect.Yugabyte
-      case "postgres" => Dialect.Postgres
-      case "mysql"    => Dialect.MySQL
-      case other      =>
-        throw new IllegalArgumentException(
-          s"Unknown dialect [$other]. Supported dialects are [yugabyte, postgres, mysql].")
-    }
-  }
 }
 
 /**
  * INTERNAL API
  */
 @InternalStableApi
-final class JournalSettings(val config: Config) extends ConnectionSettings with UseConnnectionFactory with BufferSize
-    with JournalPublishEvents with DbTimestampMonotonicIncreasing with UseAppTimestamp {
-
-  val journalTable: String = config.getString("table")
-  val journalTableWithSchema: String = schema.map(_ + ".").getOrElse("") + journalTable
-
-  val journalPayloadCodec: PayloadCodec =
-    if (useJsonPayload("payload-column-type")) PayloadCodec.JsonCodec else PayloadCodec.ByteArrayCodec
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-object JournalSettings {
-  def apply(config: Config): JournalSettings =
-    new JournalSettings(config)
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-final class SnapshotSettings(val config: Config) extends ConnectionSettings with UseConnnectionFactory {
-
-  val snapshotsTable: String = config.getString("table")
-  val snapshotsTableWithSchema: String = schema.map(_ + ".").getOrElse("") + snapshotsTable
-
-  val snapshotPayloadCodec: PayloadCodec =
-    if (useJsonPayload("payload-column-type")) PayloadCodec.JsonCodec else PayloadCodec.ByteArrayCodec
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-object SnapshotSettings {
-  def apply(config: Config): SnapshotSettings =
-    new SnapshotSettings(config)
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-final class StateSettings(val config: Config) extends ConnectionSettings with UseConnnectionFactory with BufferSize
-    with RefreshInterval with BySliceQuerySettings with DbTimestampMonotonicIncreasing with PersistenceIdsQuerySettings
-    with UseAppTimestamp {
-
-  val durableStateTable: String = config.getString("table")
-  val durableStateTableWithSchema: String = schema.map(_ + ".").getOrElse("") + durableStateTable
-
-  val durableStateAssertSingleWriter: Boolean = config.getBoolean("assert-single-writer")
-
-  val durableStatePayloadCodec: PayloadCodec =
-    if (useJsonPayload("payload-column-type")) PayloadCodec.JsonCodec else PayloadCodec.ByteArrayCodec
-
-  private val durableStateTableByEntityType: Map[String, String] = {
-    val cfg = config.getConfig("custom-table")
-    cfg.root.unwrapped.asScala.toMap.map { case (k, v) => k -> v.toString }
-  }
-
-  /**
-   * INTERNAL API
-   */
-  @InternalApi private[pekko] val durableStateTableByEntityTypeWithSchema: Map[String, String] =
-    durableStateTableByEntityType.map { case (entityType, table) =>
-      entityType -> (schema.map(_ + ".").getOrElse("") + table)
-    }
-
-  def getDurableStateTable(entityType: String): String =
-    durableStateTableByEntityType.getOrElse(entityType, durableStateTable)
-
-  def getDurableStateTableWithSchema(entityType: String): String =
-    durableStateTableByEntityTypeWithSchema.getOrElse(entityType, durableStateTableWithSchema)
-
-  /**
-   * INTERNAL API
-   */
-  @InternalApi private[pekko] val durableStateAdditionalColumnClasses: Map[String, immutable.IndexedSeq[String]] = {
-    val cfg = config.getConfig("additional-columns")
-    cfg.root.unwrapped.asScala.toMap.map {
-      case (k, v: java.util.List[_]) => k -> v.iterator.asScala.map(_.toString).toVector
-      case (k, v)                    => k -> Vector(v.toString)
-    }
-  }
-
-  /**
-   * INTERNAL API
-   */
-  @InternalApi private[pekko] val durableStateChangeHandlerClasses: Map[String, String] = {
-    val cfg = config.getConfig("change-handler")
-    cfg.root.unwrapped.asScala.toMap.map { case (k, v) => k -> v.toString }
-  }
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-object StateSettings {
-  def apply(config: Config): StateSettings =
-    new StateSettings(config)
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-final class QuerySettings(val config: Config) extends ConnectionSettings with UseConnnectionFactory with BufferSize
-    with RefreshInterval with BySliceQuerySettings with JournalPublishEvents with PersistenceIdsQuerySettings {
-
-  val journalTable: String = config.getString("table")
-  val journalTableWithSchema: String = schema.map(_ + ".").getOrElse("") + journalTable
-
-  val deduplicateCapacity: Int = config.getInt("deduplicate-capacity")
-
-  val journalPayloadCodec: PayloadCodec =
-    if (useJsonPayload("payload-column-type")) PayloadCodec.JsonCodec else PayloadCodec.ByteArrayCodec
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-object QuerySettings {
-  def apply(config: Config): QuerySettings =
-    new QuerySettings(config)
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-trait ConnectionSettings {
-  def config: Config
-
-  val dialect: Dialect = Dialect.fromString(config.getString("dialect"))
-
-  val schema: Option[String] = Option(config.getString("schema")).filterNot(_.trim.isEmpty)
-
-  val logDbCallsExceeding: FiniteDuration =
-    config.getString("log-db-calls-exceeding").toLowerCase(Locale.ROOT) match {
-      case "off" => -1.millis
-      case _     => config.getDuration("log-db-calls-exceeding").toScala
-    }
-
-  protected def useJsonPayload(configKey: String): Boolean =
-    config.getString(configKey).toUpperCase match {
-      case "BYTEA"          => false
-      case "JSONB" | "JSON" => true
-      case t                =>
-        throw new IllegalStateException(
-          s"Expected $configKey to be one of 'BYTEA', 'JSON' or 'JSONB' but found '$t'")
-    }
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-trait JournalPublishEvents {
-  def config: Config
-
-  val journalPublishEvents: Boolean = config.getBoolean("publish-events")
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-trait DbTimestampMonotonicIncreasing {
-  def config: Config
-
-  val dbTimestampMonotonicIncreasing: Boolean = config.getBoolean("db-timestamp-monotonic-increasing")
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-trait UseAppTimestamp {
-  def config: Config
-
-  /**
-   * INTERNAL API FIXME remove when https://github.com/yugabyte/yugabyte-db/issues/10995 has been resolved
-   */
-  @InternalApi private[pekko] val useAppTimestamp: Boolean = config.getBoolean("use-app-timestamp")
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-trait BufferSize {
-  def config: Config
-
-  val bufferSize: Int = config.getInt("buffer-size")
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-trait RefreshInterval {
-  def config: Config
-
-  val refreshInterval: FiniteDuration = config.getDuration("refresh-interval").toScala
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-trait BySliceQuerySettings {
-  def config: Config
-
-  val behindCurrentTime: FiniteDuration = config.getDuration("behind-current-time").toScala
+final class QuerySettings(config: Config) {
+  val refreshInterval: FiniteDuration = config.getDuration("refresh-interval").asScala
+  val behindCurrentTime: FiniteDuration = config.getDuration("behind-current-time").asScala
   val backtrackingEnabled: Boolean = config.getBoolean("backtracking.enabled")
-  val backtrackingWindow: FiniteDuration = config.getDuration("backtracking.window").toScala
-  val backtrackingBehindCurrentTime: FiniteDuration = config.getDuration("backtracking.behind-current-time").toScala
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-trait PersistenceIdsQuerySettings {
-  def config: Config
-
+  val backtrackingWindow: FiniteDuration = config.getDuration("backtracking.window").asScala
+  val backtrackingBehindCurrentTime: FiniteDuration = config.getDuration("backtracking.behind-current-time").asScala
+  val bufferSize: Int = config.getInt("buffer-size")
   val persistenceIdsBufferSize: Int = config.getInt("persistence-ids.buffer-size")
+  val deduplicateCapacity: Int = config.getInt("deduplicate-capacity")
 }
 
 /**
@@ -320,56 +193,16 @@ final class ConnectionFactorySettings(config: Config) {
 
   val initialSize: Int = config.getInt("initial-size")
   val maxSize: Int = config.getInt("max-size")
-  val maxIdleTime: FiniteDuration = config.getDuration("max-idle-time").toScala
-  val maxLifeTime: FiniteDuration = config.getDuration("max-life-time").toScala
+  val maxIdleTime: FiniteDuration = config.getDuration("max-idle-time").asScala
+  val maxLifeTime: FiniteDuration = config.getDuration("max-life-time").asScala
 
-  val connectTimeout: FiniteDuration = config.getDuration("connect-timeout").toScala
-  val acquireTimeout: FiniteDuration = config.getDuration("acquire-timeout").toScala
+  val connectTimeout: FiniteDuration = config.getDuration("connect-timeout").asScala
+  val acquireTimeout: FiniteDuration = config.getDuration("acquire-timeout").asScala
   val acquireRetry: Int = config.getInt("acquire-retry")
 
   val validationQuery: String = config.getString("validation-query")
 
   val statementCacheSize: Int = config.getInt("statement-cache-size")
-
-  val connectionFactoryOptionsCustomizer: Option[String] =
-    Option(config.getString("connection-factory-options-customizer")).filter(_.trim.nonEmpty)
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-object ConnectionFactorySettings {
-  def apply(config: Config): ConnectionFactorySettings =
-    new ConnectionFactorySettings(config)
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-final class CleanupSettings(val config: Config) {
-  val logProgressEvery: Int = config.getInt("log-progress-every")
-  val eventsJournalDeleteBatchSize: Int = config.getInt("events-journal-delete-batch-size")
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-object CleanupSettings {
-  def apply(config: Config): CleanupSettings =
-    new CleanupSettings(config)
-}
-
-/**
- * INTERNAL API
- */
-@InternalStableApi
-trait UseConnnectionFactory {
-  def config: Config
-
-  val useConnectionFactory: String = config.getString("use-connection-factory")
 }
 
 /**
@@ -378,5 +211,14 @@ trait UseConnnectionFactory {
 @InternalStableApi
 final class PublishEventsDynamicSettings(config: Config) {
   val throughputThreshold: Int = config.getInt("throughput-threshold")
-  val throughputCollectInterval: FiniteDuration = config.getDuration("throughput-collect-interval").toScala
+  val throughputCollectInterval: FiniteDuration = config.getDuration("throughput-collect-interval").asScala
+}
+
+/**
+ * INTERNAL API
+ */
+@InternalStableApi
+final class CleanupSettings(config: Config) {
+  val logProgressEvery: Int = config.getInt("log-progress-every")
+  val eventsJournalDeleteBatchSize: Int = config.getInt("events-journal-delete-batch-size")
 }

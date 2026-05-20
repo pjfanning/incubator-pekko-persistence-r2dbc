@@ -8,14 +8,13 @@
  */
 
 /*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.state.scaladsl
 
 import scala.reflect.ClassTag
 
-import org.apache.pekko
 import pekko.annotation.ApiMayChange
 import pekko.annotation.InternalApi
 
@@ -39,8 +38,7 @@ object AdditionalColumn {
       classOf[Double] -> classOf[java.lang.Double],
       classOf[Byte] -> classOf[java.lang.Byte],
       classOf[Short] -> classOf[java.lang.Short],
-      classOf[Char] -> classOf[java.lang.Character],
-      classOf[Boolean] -> classOf[java.lang.Boolean])
+      classOf[Char] -> classOf[java.lang.Character])
 }
 
 /**
@@ -56,7 +54,7 @@ abstract class AdditionalColumn[A, B: ClassTag] {
   /**
    * INTERNAL API: used when binding null
    */
-  @InternalApi private[pekko] val fieldClass: Class[_] = {
+  @InternalApi private[akka] val fieldClass: Class[_] = {
     val cls = implicitly[ClassTag[B]].runtimeClass
     scalaPrimitivesMapping.getOrElse(cls, cls)
   }

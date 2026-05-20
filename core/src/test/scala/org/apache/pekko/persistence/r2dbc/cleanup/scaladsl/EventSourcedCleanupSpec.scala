@@ -1,22 +1,11 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
  * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.cleanup.scaladsl
 
-import org.apache.pekko
 import pekko.Done
 import pekko.actor.testkit.typed.scaladsl.LogCapturing
-import pekko.actor.testkit.typed.scaladsl.LoggingTestKit
 import pekko.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
 import pekko.actor.typed.ActorSystem
 import pekko.actor.typed.scaladsl.Behaviors
@@ -27,13 +16,14 @@ import pekko.persistence.r2dbc.TestDbLifecycle
 import pekko.persistence.typed.PersistenceId
 import com.typesafe.config.ConfigFactory
 import org.scalatest.wordspec.AnyWordSpecLike
+import pekko.actor.testkit.typed.scaladsl.LoggingTestKit
 import org.slf4j.event.Level
 
 object EventSourcedCleanupSpec {
   val config = ConfigFactory
     .parseString(s"""
-    pekko.loglevel = DEBUG
-    pekko.persistence.r2dbc.cleanup {
+    akka.loglevel = DEBUG
+    akka.persistence.r2dbc.cleanup {
       log-progress-every = 2
       events-journal-delete-batch-size = 10
     }
@@ -312,6 +302,7 @@ class EventSourcedCleanupSpec
     "cleanup all before snapshot" in {
       val ackProbe = createTestProbe[Done]()
       val stateProbe = createTestProbe[String]()
+      val seqNrProbe = createTestProbe[Long]()
       val pids = Vector(nextPid(), nextPid(), nextPid())
       val persisters =
         pids.map { pid =>

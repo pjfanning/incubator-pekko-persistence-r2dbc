@@ -1,14 +1,5 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.internal
@@ -27,13 +18,13 @@ class EWMASpec extends AnyWordSpec with TestSuite with Matchers {
 
   "EWMA" should {
 
-    "calculate same ewma for constant values" in {
+    "calcualate same ewma for constant values" in {
       val ds = EWMA(value = 100.0, alpha = 0.18) :+
         100.0 :+ 100.0 :+ 100.0
       ds.value should ===(100.0 +- 0.001)
     }
 
-    "calculate correct ewma for normal decay" in {
+    "calcualate correct ewma for normal decay" in {
       val d0 = EWMA(value = 1000.0, alpha = 2.0 / (1 + 10))
       d0.value should ===(1000.0 +- 0.01)
       val d1 = d0 :+ 10.0

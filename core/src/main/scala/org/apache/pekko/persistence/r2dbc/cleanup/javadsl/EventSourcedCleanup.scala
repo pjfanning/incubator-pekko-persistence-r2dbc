@@ -8,7 +8,7 @@
  */
 
 /*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.cleanup.javadsl
@@ -16,23 +16,20 @@ package org.apache.pekko.persistence.r2dbc.cleanup.javadsl
 import java.util.concurrent.CompletionStage
 import java.util.{ List => JList }
 
-import scala.jdk.CollectionConverters._
-import scala.jdk.FutureConverters._
+import scala.collection.JavaConverters._
+import scala.compat.java8.FutureConverters._
 
-import org.apache.pekko
 import pekko.Done
 import pekko.actor.ClassicActorSystemProvider
 import pekko.annotation.ApiMayChange
-import pekko.persistence.r2dbc.cleanup.{ scaladsl => s }
+import pekko.persistence.r2dbc.cleanup.scaladsl
 
 /**
- * Java API: Tool for deleting events and/or snapshots for a given list of `persistenceIds` without using persistent
- * actors.
+ * Java API: Tool for deleting all events and/or snapshots for a given list of `persistenceIds` without using persistent
+ * actors. It's important that the actors with corresponding `persistenceId` are not running at the same time as using
+ * the tool.
  *
- * When running an operation with `EventSourcedCleanup` that deletes all events for a persistence id, the actor with
- * that persistence id must not be running! If the actor is restarted it would in that case be recovered to the wrong
- * state since the stored events have been deleted. Delete events before snapshot can still be used while the actor is
- * running.
+ * WARNING: deleting events is generally discouraged in event sourced systems.
  *
  * If `resetSequenceNumber` is `true` then the creating entity with the same `persistenceId` will start from 0.
  * Otherwise it will continue from the latest highest used sequence number.
@@ -43,17 +40,15 @@ import pekko.persistence.r2dbc.cleanup.{ scaladsl => s }
  * When a list of `persistenceIds` are given they are deleted sequentially in the order of the list. It's possible to
  * parallelize the deletes by running several cleanup operations at the same time operating on different sets of
  * `persistenceIds`.
- *
- *  @since 2.0.0
  */
 @ApiMayChange
-final class EventSourcedCleanup private (delegate: s.EventSourcedCleanup) {
+final class EventSourcedCleanup private (delegate: scaladsl.EventSourcedCleanup) {
 
   def this(systemProvider: ClassicActorSystemProvider, configPath: String) =
-    this(new s.EventSourcedCleanup(systemProvider, configPath))
+    this(new scaladsl.EventSourcedCleanup(systemProvider, configPath))
 
   def this(systemProvider: ClassicActorSystemProvider) =
-    this(systemProvider, "pekko.persistence.r2dbc.cleanup")
+    this(systemProvider, "akka.persistence.r2dbc.cleanup")
 
   /**
    * Delete all events before a sequenceNr for the given persistence id. Snapshots are not deleted.
@@ -64,54 +59,55 @@ final class EventSourcedCleanup private (delegate: s.EventSourcedCleanup) {
    *   sequence nr (inclusive) to delete up to
    */
   def deleteEventsTo(persistenceId: String, toSequenceNr: Long): CompletionStage[Done] =
-    delegate.deleteEventsTo(persistenceId, toSequenceNr).asJava
+    delegate.deleteEventsTo(persistenceId, toSequenceNr).toJava
 
   /**
    * Delete all events related to one single `persistenceId`. Snapshots are not deleted.
    */
   def deleteAllEvents(persistenceId: String, resetSequenceNumber: Boolean): CompletionStage[Done] =
-    delegate.deleteAllEvents(persistenceId, resetSequenceNumber).asJava
+    delegate.deleteAllEvents(persistenceId, resetSequenceNumber).toJava
 
   /**
    * Delete all events related to the given list of `persistenceIds`. Snapshots are not deleted.
    */
   def deleteAllEvents(persistenceIds: JList[String], resetSequenceNumber: Boolean): CompletionStage[Done] =
-    delegate.deleteAllEvents(persistenceIds.asScala.toVector, resetSequenceNumber).asJava
+    delegate.deleteAllEvents(persistenceIds.asScala.toVector, resetSequenceNumber).toJava
 
   /**
    * Delete snapshots related to one single `persistenceId`. Events are not deleted.
    */
   def deleteSnapshot(persistenceId: String): CompletionStage[Done] =
-    delegate.deleteSnapshot(persistenceId).asJava
+    delegate.deleteSnapshot(persistenceId).toJava
 
   /**
    * Delete all snapshots related to the given list of `persistenceIds`. Events are not deleted.
    */
   def deleteSnapshots(persistenceIds: JList[String]): CompletionStage[Done] =
-    delegate.deleteSnapshots(persistenceIds.asScala.toVector).asJava
+    delegate.deleteSnapshots(persistenceIds.asScala.toVector).toJava
 
   /**
    * Deletes all events for the given persistence id from before the snapshot. The snapshot is not deleted. The event
    * with the same sequence number as the remaining snapshot is deleted.
    */
   def cleanupBeforeSnapshot(persistenceId: String): CompletionStage[Done] =
-    delegate.cleanupBeforeSnapshot(persistenceId).asJava
+    delegate.cleanupBeforeSnapshot(persistenceId).toJava
 
   /**
-   * See single persistenceId overload for what is done for each persistence id.
+   * See single persistenceId overload for what is done for each persistence id
    */
   def cleanupBeforeSnapshot(persistenceIds: JList[String]): CompletionStage[Done] =
-    delegate.cleanupBeforeSnapshot(persistenceIds.asScala.toVector).asJava
+    delegate.cleanupBeforeSnapshot(persistenceIds.asScala.toVector).toJava
 
   /**
    * Delete everything related to one single `persistenceId`. All events and snapshots are deleted.
    */
   def deleteAll(persistenceId: String, resetSequenceNumber: Boolean): CompletionStage[Done] =
-    delegate.deleteAll(persistenceId, resetSequenceNumber).asJava
+    delegate.deleteAll(persistenceId, resetSequenceNumber).toJava
 
   /**
    * Delete everything related to the given list of `persistenceIds`. All events and snapshots are deleted.
    */
   def deleteAll(persistenceIds: JList[String], resetSequenceNumber: Boolean): CompletionStage[Done] =
-    delegate.deleteAll(persistenceIds.asScala.toVector, resetSequenceNumber).asJava
+    delegate.deleteAll(persistenceIds.asScala.toVector, resetSequenceNumber).toJava
+
 }

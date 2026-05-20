@@ -1,14 +1,5 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc
@@ -17,14 +8,14 @@ import com.typesafe.config.Config
 import com.typesafe.config.ConfigFactory
 
 object TestConfig {
-  lazy val unresolvedConfig: Config = {
+  lazy val config: Config = {
     val defaultConfig = ConfigFactory.load()
-    val dialect = defaultConfig.getString("pekko.persistence.r2dbc.dialect")
+    val dialect = defaultConfig.getString("akka.persistence.r2dbc.dialect")
 
     val dialectConfig = dialect match {
       case "postgres" =>
         ConfigFactory.parseString("""
-          pekko.persistence.r2dbc.connection-factory {
+          akka.persistence.r2dbc.connection-factory {
             driver = "postgres"
             host = "localhost"
             port = 5432
@@ -35,7 +26,7 @@ object TestConfig {
           """)
       case "yugabyte" =>
         ConfigFactory.parseString("""
-          pekko.persistence.r2dbc.connection-factory {
+          akka.persistence.r2dbc.connection-factory {
             driver = "postgres"
             host = "localhost"
             port = 5433
@@ -44,41 +35,29 @@ object TestConfig {
             database = "yugabyte"
           }
           """)
-      case "mysql" =>
-        ConfigFactory.parseString("""
-          pekko.persistence.r2dbc {
-            connection-factory {
-              driver = "mysql"
-              host = "localhost"
-              port = 3306
-              user = "root"
-              password = "root"
-              database = "mysql"
-            }
-            db-timestamp-monotonic-increasing = on
-            use-app-timestamp = on
-          }
-          """)
     }
 
-    dialectConfig.withFallback(ConfigFactory.parseString("""
-    pekko.loglevel = DEBUG
-    pekko.persistence.journal.plugin = "pekko.persistence.r2dbc.journal"
-    pekko.persistence.snapshot-store.plugin = "pekko.persistence.r2dbc.snapshot"
-    pekko.persistence.state.plugin = "pekko.persistence.r2dbc.state"
-    pekko.persistence.r2dbc.refresh-interval = 1s
-    pekko.actor {
-      serialization-bindings {
-        "org.apache.pekko.persistence.r2dbc.CborSerializable" = jackson-cbor
-        "org.apache.pekko.persistence.r2dbc.JsonSerializable" = jackson-json
+    // using load here so that connection-factory can be overridden
+    ConfigFactory.load(dialectConfig.withFallback(ConfigFactory.parseString("""
+    akka.loglevel = DEBUG
+    akka.persistence.journal.plugin = "akka.persistence.r2dbc.journal"
+    akka.persistence.snapshot-store.plugin = "akka.persistence.r2dbc.snapshot"
+    akka.persistence.state.plugin = "akka.persistence.r2dbc.state"
+    akka.persistence.r2dbc {
+      query {
+        refresh-interval = 1s
       }
     }
-    pekko.actor.testkit.typed.default-timeout = 10s
-    """))
+    akka.actor {
+      serialization-bindings {
+        "akka.persistence.r2dbc.CborSerializable" = jackson-cbor
+        "akka.persistence.r2dbc.JsonSerializable" = jackson-json
+      }
+    }
+    akka.actor.testkit.typed.default-timeout = 10s
+    """)))
   }
 
-  lazy val config: Config = ConfigFactory.load(unresolvedConfig)
-
   val backtrackingDisabledConfig: Config =
-    ConfigFactory.parseString("pekko.persistence.r2dbc.backtracking.enabled = off")
+    ConfigFactory.parseString("akka.persistence.r2dbc.query.backtracking.enabled = off")
 }

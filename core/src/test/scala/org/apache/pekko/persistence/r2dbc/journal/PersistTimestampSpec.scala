@@ -1,14 +1,5 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.journal
@@ -16,14 +7,14 @@ package org.apache.pekko.persistence.r2dbc.journal
 import java.time.Instant
 
 import scala.concurrent.duration._
-import org.apache.pekko
+
 import pekko.Done
 import pekko.actor.testkit.typed.scaladsl.LogCapturing
 import pekko.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
 import pekko.actor.typed.ActorSystem
 import pekko.persistence.r2dbc.internal.PayloadCodec
 import pekko.persistence.r2dbc.internal.PayloadCodec.RichRow
-import pekko.persistence.r2dbc.JournalSettings
+import pekko.persistence.r2dbc.R2dbcSettings
 import pekko.persistence.r2dbc.TestActors.Persister
 import pekko.persistence.r2dbc.TestConfig
 import pekko.persistence.r2dbc.TestData
@@ -40,10 +31,9 @@ class PersistTimestampSpec
     with LogCapturing {
 
   override def typedSystem: ActorSystem[_] = system
-  private val settings = JournalSettings(system.settings.config.getConfig("pekko.persistence.r2dbc.journal"))
+  private val settings = new R2dbcSettings(system.settings.config.getConfig("akka.persistence.r2dbc"))
   private val serialization = SerializationExtension(system)
   private implicit val journalPayloadCodec: PayloadCodec = settings.journalPayloadCodec
-
   case class Row(pid: String, seqNr: Long, dbTimestamp: Instant, event: String)
 
   "Persist timestamp" should {
@@ -60,12 +50,12 @@ class PersistTimestampSpec
       (1 to 100).foreach { n =>
         val p = n % numberOfEntities
         // mix some persist 1 and persist 3 events
+        val event = s"e$p-$n"
         if (n % 5 == 0) {
           // same event stored 3 times
-          val event = s"e$p-$n"
           entities(p) ! Persister.PersistAll((0 until 3).map(_ => event).toList)
         } else {
-          entities(p) ! Persister.Persist(s"e$p-$n")
+          entities(p) ! Persister.Persist(event)
         }
       }
 
@@ -83,7 +73,7 @@ class PersistTimestampSpec
               val event = serialization
                 .deserialize(
                   row.getPayload("event_payload"),
-                  row.get[Integer]("event_ser_id", classOf[Integer]),
+                  row.get("event_ser_id", classOf[Integer]),
                   row.get("event_ser_manifest", classOf[String]))
                 .get
                 .asInstanceOf[String]

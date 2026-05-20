@@ -1,19 +1,9 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
  * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.journal
 
-import org.apache.pekko
 import pekko.Done
 import pekko.actor.testkit.typed.scaladsl.LogCapturing
 import pekko.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
@@ -33,13 +23,13 @@ object MultiPluginSpec {
   val config: Config = ConfigFactory
     .parseString("""
     // #default-config
-    pekko.persistence.journal.plugin = "pekko.persistence.r2dbc.journal"
-    pekko.persistence.snapshot-store.plugin = "pekko.persistence.r2dbc.snapshot"
-    pekko.persistence.state.plugin = "pekko.persistence.r2dbc.state"
+    akka.persistence.journal.plugin = "akka.persistence.r2dbc.journal"
+    akka.persistence.snapshot-store.plugin = "akka.persistence.r2dbc.snapshot"
+    akka.persistence.state.plugin = "akka.persistence.r2dbc.state"
     // #default-config
 
     // #second-config
-    second-r2dbc = ${pekko.persistence.r2dbc}
+    second-r2dbc = ${akka.persistence.r2dbc}
     second-r2dbc {
       connection-factory {
         # specific connection properties here

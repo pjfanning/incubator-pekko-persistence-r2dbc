@@ -8,38 +8,37 @@
  */
 
 /*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.internal
 
-import scala.jdk.FutureConverters._
+import scala.compat.java8.FutureConverters._
 import scala.concurrent.Future
 import scala.util.Try
 
-import org.apache.pekko
 import pekko.Done
 import pekko.actor.ExtendedActorSystem
 import pekko.actor.typed.ActorSystem
 import pekko.annotation.InternalApi
 import pekko.persistence.query.DurableStateChange
 import pekko.persistence.r2dbc.session.scaladsl.R2dbcSession
-import pekko.persistence.r2dbc.state.{ javadsl => javadslState }
+import pekko.persistence.r2dbc.state.javadsl
 import pekko.persistence.r2dbc.state.scaladsl.ChangeHandler
 
 /**
  * INTERNAL API
  */
-@InternalApi private[pekko] object ChangeHandlerFactory {
+@InternalApi private[akka] object ChangeHandlerFactory {
 
   /**
    * Adapter from javadsl.ChangeHandler to scaladsl.ChangeHandler
    */
-  final class ChangeHandlerAdapter(delegate: javadslState.ChangeHandler[Any]) extends ChangeHandler[Any] {
+  final class ChangeHandlerAdapter(delegate: javadsl.ChangeHandler[Any]) extends ChangeHandler[Any] {
     override def process(session: R2dbcSession, change: DurableStateChange[Any]): Future[Done] = {
       val javadslSession =
-        new pekko.persistence.r2dbc.session.javadsl.R2dbcSession(session.connection)(session.ec, session.system)
-      delegate.process(javadslSession, change).asScala
+        new akka.persistence.r2dbc.session.javadsl.R2dbcSession(session.connection)(session.ec, session.system)
+      delegate.process(javadslSession, change).toScala
     }
   }
 
@@ -56,31 +55,31 @@ import pekko.persistence.r2dbc.state.scaladsl.ChangeHandler
               dynamicAccess
                 .createInstanceFor[ChangeHandler[Any]](
                   fqcn,
-                  List(classOf[pekko.actor.ActorSystem] -> system.classicSystem))))
+                  List(classOf[akka.actor.ActorSystem] -> system.classicSystem))))
     }
 
-    def tryCreateJavadslInstance(): Try[javadslState.ChangeHandler[Any]] = {
+    def tryCreateJavadslInstance(): Try[javadsl.ChangeHandler[Any]] = {
       dynamicAccess
-        .createInstanceFor[javadslState.ChangeHandler[Any]](fqcn, Nil)
+        .createInstanceFor[javadsl.ChangeHandler[Any]](fqcn, Nil)
         .orElse(
           dynamicAccess
-            .createInstanceFor[javadslState.ChangeHandler[Any]](fqcn, List(classOf[ActorSystem[_]] -> system))
+            .createInstanceFor[javadsl.ChangeHandler[Any]](fqcn, List(classOf[ActorSystem[_]] -> system))
             .orElse(
               dynamicAccess
-                .createInstanceFor[javadslState.ChangeHandler[Any]](
+                .createInstanceFor[javadsl.ChangeHandler[Any]](
                   fqcn,
-                  List(classOf[pekko.actor.ActorSystem] -> system.classicSystem))))
+                  List(classOf[akka.actor.ActorSystem] -> system.classicSystem))))
     }
 
-    def adapt(changeHandler: javadslState.ChangeHandler[Any]): ChangeHandler[Any] =
+    def adapt(changeHandler: javadsl.ChangeHandler[Any]): ChangeHandler[Any] =
       new ChangeHandlerAdapter(changeHandler)
 
     tryCreateScaladslInstance()
       .orElse(tryCreateJavadslInstance().map(adapt))
       .getOrElse(
         throw new IllegalArgumentException(
-          s"Change handler [$fqcn] must implement " +
-          s"[${classOf[ChangeHandler[_]].getName}] or [${classOf[javadslState.ChangeHandler[_]].getName}]. It " +
+          s"Additional column [$fqcn] must implement " +
+          s"[${classOf[ChangeHandler[_]].getName}] or [${classOf[javadsl.ChangeHandler[_]].getName}]. It " +
           s"may have an ActorSystem constructor parameter."))
 
   }

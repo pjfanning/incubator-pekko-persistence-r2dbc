@@ -8,7 +8,7 @@
  */
 
 /*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.internal
@@ -16,12 +16,12 @@ package org.apache.pekko.persistence.r2dbc.internal
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 
-import org.apache.pekko.annotation.InternalApi
+import pekko.annotation.InternalApi
 
 /**
  * INTERNAL API
  */
-@InternalApi private[pekko] object InstantFactory {
+@InternalApi private[akka] object InstantFactory {
 
   /**
    * Current time truncated to microseconds. The reason for using microseconds is that Postgres timestamps has the

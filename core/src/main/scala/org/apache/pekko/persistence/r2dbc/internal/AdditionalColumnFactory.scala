@@ -8,49 +8,47 @@
  */
 
 /*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.internal
 
 import scala.util.Try
 
-import org.apache.pekko
 import pekko.actor.{ ActorSystem => ClassicActorSystem }
 import pekko.actor.ExtendedActorSystem
 import pekko.actor.typed.ActorSystem
 import pekko.annotation.InternalApi
 import pekko.persistence.r2dbc.state.scaladsl.AdditionalColumn
-import pekko.persistence.r2dbc.state.{ javadsl => javadslState }
+import pekko.persistence.r2dbc.state.javadsl
 
 /**
  * INTERNAL API
  */
-@InternalApi private[pekko] object AdditionalColumnFactory {
+@InternalApi private[akka] object AdditionalColumnFactory {
 
   /**
-   * Adapter from javadsl.AdditionalColumn to scaladsl.AdditionalColumn
+   * Adapter from javadsl.AdditionColumn to scaladsl.AdditionalColumn
    */
-  final class AdditionalColumnAdapter(delegate: javadslState.AdditionalColumn[Any, Any])
-      extends AdditionalColumn[Any, Any] {
+  final class AdditionColumnAdapter(delegate: javadsl.AdditionalColumn[Any, Any]) extends AdditionalColumn[Any, Any] {
 
-    override private[pekko] val fieldClass: Class[_] =
+    override private[akka] val fieldClass: Class[_] =
       delegate.fieldClass
 
     override def columnName: String =
       delegate.columnName
 
     override def bind(upsert: AdditionalColumn.Upsert[Any]): AdditionalColumn.Binding[Any] = {
-      val javadslUpsert = new javadslState.AdditionalColumn.Upsert[Any](
+      val javadslUpsert = new javadsl.AdditionalColumn.Upsert[Any](
         upsert.persistenceId,
         upsert.entityType,
         upsert.slice,
         upsert.revision,
         upsert.value)
       delegate.bind(javadslUpsert) match {
-        case bindValue: javadslState.AdditionalColumn.BindValue[_] => AdditionalColumn.BindValue(bindValue.value)
-        case javadslState.AdditionalColumn.BindNull                => AdditionalColumn.BindNull
-        case javadslState.AdditionalColumn.Skip                    => AdditionalColumn.Skip
+        case bindValue: javadsl.AdditionalColumn.BindValue[_] => AdditionalColumn.BindValue(bindValue.value)
+        case javadsl.AdditionalColumn.BindNull                => AdditionalColumn.BindNull
+        case javadsl.AdditionalColumn.Skip                    => AdditionalColumn.Skip
       }
     }
 
@@ -70,28 +68,26 @@ import pekko.persistence.r2dbc.state.{ javadsl => javadslState }
               List(classOf[ClassicActorSystem] -> system.classicSystem))))
     }
 
-    def tryCreateJavadslInstance(): Try[javadslState.AdditionalColumn[Any, Any]] = {
+    def tryCreateJavadslInstance(): Try[javadsl.AdditionalColumn[Any, Any]] = {
       dynamicAccess
-        .createInstanceFor[javadslState.AdditionalColumn[Any, Any]](fqcn, Nil)
+        .createInstanceFor[javadsl.AdditionalColumn[Any, Any]](fqcn, Nil)
         .orElse(
           dynamicAccess
-            .createInstanceFor[javadslState.AdditionalColumn[Any, Any]](
-              fqcn,
-              List(classOf[ActorSystem[_]] -> system))
-            .orElse(dynamicAccess.createInstanceFor[javadslState.AdditionalColumn[Any, Any]](
+            .createInstanceFor[javadsl.AdditionalColumn[Any, Any]](fqcn, List(classOf[ActorSystem[_]] -> system))
+            .orElse(dynamicAccess.createInstanceFor[javadsl.AdditionalColumn[Any, Any]](
               fqcn,
               List(classOf[ClassicActorSystem] -> system.classicSystem))))
     }
 
-    def adapt(javadslColumn: javadslState.AdditionalColumn[Any, Any]): AdditionalColumn[Any, Any] =
-      new AdditionalColumnAdapter(javadslColumn)
+    def adapt(javadslColumn: javadsl.AdditionalColumn[Any, Any]): AdditionalColumn[Any, Any] =
+      new AdditionColumnAdapter(javadslColumn)
 
     tryCreateScaladslInstance()
       .orElse(tryCreateJavadslInstance().map(adapt))
       .getOrElse(
         throw new IllegalArgumentException(
           s"Additional column [$fqcn] must implement " +
-          s"[${classOf[AdditionalColumn[_, _]].getName}] or [${classOf[javadslState.AdditionalColumn[_, _]].getName}]. It " +
+          s"[${classOf[AdditionalColumn[_, _]].getName}] or [${classOf[javadsl.AdditionalColumn[_, _]].getName}]. It " +
           s"may have an ActorSystem constructor parameter."))
   }
 

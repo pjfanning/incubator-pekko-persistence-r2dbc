@@ -1,14 +1,5 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.state
@@ -18,7 +9,6 @@ import java.lang
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
-import org.apache.pekko
 import pekko.actor.testkit.typed.scaladsl.LogCapturing
 import pekko.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
 import pekko.actor.typed.ActorSystem
@@ -34,26 +24,21 @@ import pekko.persistence.state.DurableStateStoreRegistry
 import pekko.persistence.state.scaladsl.GetObjectResult
 import com.typesafe.config.Config
 import com.typesafe.config.ConfigFactory
-import org.scalatest.Outcome
-import org.scalatest.Pending
 import org.scalatest.wordspec.AnyWordSpecLike
 
 object DurableStateStoreAdditionalColumnSpec {
   val config: Config = ConfigFactory
     .parseString(s"""
-    pekko.persistence.r2dbc.state {
+    akka.persistence.r2dbc.state {
       custom-table {
         "CustomEntity" = durable_state_test
       }
       additional-columns {
-        "CustomEntity" = ["${classOf[Column1].getName}", "${classOf[Column2].getName}", "${classOf[
-        JavadslColumn].getName}"]
+        "CustomEntity" = ["${classOf[Column1].getName}", "${classOf[Column2].getName}", "${classOf[JavadslColumn].getName}"]
       }
     }
     """)
     .withFallback(TestConfig.config)
-
-  val dialect = config.getString("pekko.persistence.r2dbc.dialect")
 
   class Column1 extends AdditionalColumn[String, String] {
     override def columnName: String = "col1"
@@ -81,42 +66,33 @@ class DurableStateStoreAdditionalColumnSpec
     with TestData
     with LogCapturing {
 
-  private val customTable = stateSettings.getDurableStateTableWithSchema("CustomEntity")
+  private val customTable = r2dbcSettings.getDurableStateTableWithSchema("CustomEntity")
 
   override def typedSystem: ActorSystem[_] = system
 
   override def beforeAll(): Unit = {
     super.beforeAll()
-    if (DurableStateStoreAdditionalColumnSpec.dialect != "mysql") {
-      Await.result(
-        r2dbcExecutor.executeDdl("beforeAll create durable_state_test")(
-          _.createStatement(
-            s"create table if not exists $customTable as select * from durable_state where persistence_id = ''")),
-        20.seconds)
-      Await.result(
-        r2dbcExecutor.executeDdl("beforeAll alter durable_state_test")(
-          _.createStatement(s"alter table $customTable add if not exists col1 varchar(256)")),
-        20.seconds)
-      Await.result(
-        r2dbcExecutor.executeDdl("beforeAll alter durable_state_test")(
-          _.createStatement(s"alter table $customTable add if not exists col2 int")),
-        20.seconds)
-      Await.result(
-        r2dbcExecutor.executeDdl("beforeAll alter durable_state_test")(
-          _.createStatement(s"alter table $customTable add if not exists col3 int")),
-        20.seconds)
-      Await.result(
-        r2dbcExecutor.updateOne("beforeAll delete")(_.createStatement(s"delete from $customTable")),
-        10.seconds)
-    }
+    Await.result(
+      r2dbcExecutor.executeDdl("beforeAll create durable_state_test")(
+        _.createStatement(
+          s"create table if not exists $customTable as select * from durable_state where persistence_id = ''")),
+      20.seconds)
+    Await.result(
+      r2dbcExecutor.executeDdl("beforeAll alter durable_state_test")(
+        _.createStatement(s"alter table $customTable add if not exists col1 varchar(256)")),
+      20.seconds)
+    Await.result(
+      r2dbcExecutor.executeDdl("beforeAll alter durable_state_test")(
+        _.createStatement(s"alter table $customTable add if not exists col2 int")),
+      20.seconds)
+    Await.result(
+      r2dbcExecutor.executeDdl("beforeAll alter durable_state_test")(
+        _.createStatement(s"alter table $customTable add if not exists col3 int")),
+      20.seconds)
+    Await.result(
+      r2dbcExecutor.updateOne("beforeAll delete")(_.createStatement(s"delete from $customTable")),
+      10.seconds)
   }
-
-  override def withFixture(test: NoArgTest): Outcome =
-    if (DurableStateStoreAdditionalColumnSpec.dialect == "mysql") {
-      Pending // MySQL doesn't support CREATE TABLE AS SELECT or ALTER TABLE ADD IF NOT EXISTS
-    } else {
-      super.withFixture(test)
-    }
 
   private val store = DurableStateStoreRegistry(testKit.system)
     .durableStateStoreFor[R2dbcDurableStateStore[String]](R2dbcDurableStateStore.Identifier)

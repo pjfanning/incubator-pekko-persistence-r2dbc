@@ -1,27 +1,16 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.query
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
-
-import org.apache.pekko
 import pekko.Done
 import pekko.NotUsed
 import pekko.actor.testkit.typed.scaladsl.LogCapturing
 import pekko.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
-import pekko.actor.typed.ActorSystem
+import pekko.actor.typed.{ ActorRef, ActorSystem }
 import pekko.persistence.query.NoOffset
 import pekko.persistence.query.Offset
 import pekko.persistence.query.PersistenceQuery
@@ -29,6 +18,7 @@ import pekko.persistence.query.TimestampOffset
 import pekko.persistence.query.typed.EventEnvelope
 import pekko.persistence.query.typed.scaladsl.EventTimestampQuery
 import pekko.persistence.query.typed.scaladsl.LoadEventQuery
+import pekko.persistence.r2dbc.R2dbcSettings
 import pekko.persistence.r2dbc.TestActors
 import pekko.persistence.r2dbc.TestActors.Persister
 import pekko.persistence.r2dbc.TestActors.Persister.Persist
@@ -59,13 +49,13 @@ object EventsBySliceSpec {
       .withFallback(ConfigFactory.parseString(s"""
     # This test is not using backtracking, so increase behind-current-time to
     # reduce risk of missing events
-    pekko.persistence.r2dbc.query.behind-current-time = 500 millis
-    pekko.persistence.r2dbc-small-buffer = $${pekko.persistence.r2dbc}
+    akka.persistence.r2dbc.query.behind-current-time = 500 millis
+    akka.persistence.r2dbc-small-buffer = $${akka.persistence.r2dbc}
 
-    pekko.persistence.r2dbc.journal.publish-events = off
+    akka.persistence.r2dbc.journal.publish-events = off
 
     # this is used by the "read in chunks" test
-    pekko.persistence.r2dbc-small-buffer.query {
+    akka.persistence.r2dbc-small-buffer.query {
       buffer-size = 4
       # for this extreme scenario it will add delay between each query for the live case
       refresh-interval = 20 millis
@@ -84,6 +74,7 @@ class EventsBySliceSpec
   import EventsBySliceSpec._
 
   override def typedSystem: ActorSystem[_] = system
+  private val settings = new R2dbcSettings(system.settings.config.getConfig("akka.persistence.r2dbc"))
 
   private val query = PersistenceQuery(testKit.system).readJournalFor[R2dbcReadJournal](R2dbcReadJournal.Identifier)
 
@@ -93,7 +84,7 @@ class EventsBySliceSpec
     val slice = query.sliceForPersistenceId(persistenceId)
     val persister = spawn(TestActors.Persister(persistenceId))
     val probe = createTestProbe[Done]()
-    val sinkProbe = TestSink[EventEnvelope[String]]()(system.classicSystem)
+    val sinkProbe = TestSink.probe[EventEnvelope[String]](system.classicSystem)
   }
 
   List[QueryType](Current, Live).foreach { queryType =>
@@ -153,7 +144,7 @@ class EventsBySliceSpec
 
         val withOffset =
           doQuery(entityType, slice, slice, offset)
-            .runWith(TestSink[EventEnvelope[String]]()(system.classicSystem))
+            .runWith(TestSink.probe[EventEnvelope[String]](system.classicSystem))
         withOffset.request(12)
         for (i <- 11 to 20) {
           withOffset.expectNext().event shouldBe s"e-$i"
@@ -163,7 +154,7 @@ class EventsBySliceSpec
 
       "read in chunks" in new Setup {
         val queryWithSmallBuffer = PersistenceQuery(testKit.system)
-          .readJournalFor[R2dbcReadJournal]("pekko.persistence.r2dbc-small-buffer.query")
+          .readJournalFor[R2dbcReadJournal]("akka.persistence.r2dbc-small-buffer.query")
         for (i <- 1 to 10; n <- 1 to 10 by 2) {
           persister ! PersistAll(List(s"e-$i-$n", s"e-$i-${n + 1}"))
         }
@@ -238,6 +229,25 @@ class EventsBySliceSpec
         }
       }
 
+      "includes tags" in new Setup {
+        val taggingPersister: ActorRef[Persister.Command] =
+          spawn(TestActors.Persister(PersistenceId.ofUniqueId(persistenceId), tags = Set("tag-A")))
+        for (i <- 1 to 3) {
+          taggingPersister ! PersistWithAck(s"f-$i", probe.ref)
+          probe.expectMessage(10.seconds, Done)
+        }
+
+        val result: TestSubscriber.Probe[EventEnvelope[String]] =
+          doQuery(entityType, slice, slice, NoOffset)
+            .runWith(TestSink())
+
+        result.request(3)
+        val envelopes = result.expectNextN(3)
+        envelopes.map(_.tags) should ===(Seq(Set("tag-A"), Set("tag-A"), Set("tag-A")))
+
+        query.loadEnvelope[String](persistenceId, 1L).futureValue.tags shouldBe Set("tag-A")
+      }
+
     }
   }
 
@@ -292,17 +302,18 @@ class EventsBySliceSpec
       ranges(2) should be(512 to 767)
       ranges(3) should be(768 to 1023)
 
-      val allEnvelopes = (0 until 4).flatMap { rangeIndex =>
-        val result =
-          query
-            .currentEventsBySlices[String](entityType, ranges(rangeIndex).min, ranges(rangeIndex).max, NoOffset)
-            .runWith(Sink.seq)
-            .futureValue
-        result.foreach { env =>
-          ranges(rangeIndex) should contain(query.sliceForPersistenceId(env.persistenceId))
+      val allEnvelopes =
+        (0 until 4).flatMap { rangeIndex =>
+          val result =
+            query
+              .currentEventsBySlices[String](entityType, ranges(rangeIndex).min, ranges(rangeIndex).max, NoOffset)
+              .runWith(Sink.seq)
+              .futureValue
+          result.foreach { env =>
+            ranges(rangeIndex) should contain(query.sliceForPersistenceId(env.persistenceId))
+          }
+          result
         }
-        result
-      }
       allEnvelopes.size should be(numberOfPersisters * numberOfEvents)
     }
   }
@@ -348,14 +359,15 @@ class EventsBySliceSpec
       ranges(2) should be(512 to 767)
       ranges(3) should be(768 to 1023)
 
-      val queries: Seq[Source[EventEnvelope[String], NotUsed]] = (0 until 4).map { rangeIndex =>
-        query
-          .eventsBySlices[String](entityType, ranges(rangeIndex).min, ranges(rangeIndex).max, NoOffset)
-          .map { env =>
-            ranges(rangeIndex) should contain(query.sliceForPersistenceId(env.persistenceId))
-            env
-          }
-      }
+      val queries: Seq[Source[EventEnvelope[String], NotUsed]] =
+        (0 until 4).map { rangeIndex =>
+          query
+            .eventsBySlices[String](entityType, ranges(rangeIndex).min, ranges(rangeIndex).max, NoOffset)
+            .map { env =>
+              ranges(rangeIndex) should contain(query.sliceForPersistenceId(env.persistenceId))
+              env
+            }
+        }
       val allEnvelopes =
         queries(0)
           .merge(queries(1))

@@ -15,7 +15,7 @@ package org.apache.pekko.persistence.r2dbc.internal
 
 import java.nio.charset.StandardCharsets.UTF_8
 
-import org.apache.pekko.annotation.InternalApi
+import pekko.annotation.InternalApi
 import io.r2dbc.postgresql.codec.Json
 import io.r2dbc.spi.Row
 import io.r2dbc.spi.Statement
@@ -23,7 +23,7 @@ import io.r2dbc.spi.Statement
 /**
  * INTERNAL API
  */
-@InternalApi private[pekko] sealed trait PayloadCodec {
+@InternalApi private[akka] sealed trait PayloadCodec {
   def payloadClass: Class[_]
   def encode(bytes: Array[Byte]): Any
   def decode(payload: Any): Array[Byte]
@@ -33,7 +33,7 @@ import io.r2dbc.spi.Statement
 /**
  * INTERNAL API
  */
-@InternalApi private[pekko] object PayloadCodec {
+@InternalApi private[akka] object PayloadCodec {
   case object ByteArrayCodec extends PayloadCodec {
     override def payloadClass: Class[Array[Byte]] = classOf[Array[Byte]]
     override def encode(bytes: Array[Byte]): Array[Byte] = bytes

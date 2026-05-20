@@ -1,14 +1,5 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.internal
@@ -22,10 +13,8 @@ class SqlSpec extends AnyWordSpec with TestSuite with Matchers {
 
   "SQL string interpolation" should {
     "replace ? bind parameters with numbered $ (avoiding escaped ones)" in {
-      sql"select * from bar where a = ? and qa = 'Question?? Answer!'" shouldBe
-      "select * from bar where a = $1 and qa = 'Question? Answer!'"
-      sql"select * from bar where a = ? and b = ? and jsonb ?? 'status' and c = ?" shouldBe
-      "select * from bar where a = $1 and b = $2 and jsonb ? 'status' and c = $3"
+      sql"select * from bar where a = ? and qa = 'Question?? Answer!'" shouldBe "select * from bar where a = $1 and qa = 'Question? Answer!'"
+      sql"select * from bar where a = ? and b = ? and jsonb ?? 'status' and c = ?" shouldBe "select * from bar where a = $1 and b = $2 and jsonb ? 'status' and c = $3"
       sql"select * from bar" shouldBe "select * from bar"
     }
 

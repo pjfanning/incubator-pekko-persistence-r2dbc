@@ -8,7 +8,7 @@
  */
 
 /*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.query.javadsl
@@ -17,13 +17,10 @@ import java.time.Instant
 import java.util
 import java.util.Optional
 import java.util.concurrent.CompletionStage
-
-import scala.concurrent.ExecutionContext
-import scala.jdk.FutureConverters._
-import scala.jdk.OptionConverters._
-
-import org.apache.pekko
+import scala.compat.java8.OptionConverters._
+import scala.compat.java8.FutureConverters._
 import pekko.NotUsed
+import pekko.dispatch.ExecutionContexts
 import pekko.japi.Pair
 import pekko.persistence.query.{ EventEnvelope => ClassicEventEnvelope }
 import pekko.persistence.query.Offset
@@ -75,7 +72,7 @@ final class R2dbcReadJournal(delegate: scaladsl.R2dbcReadJournal)
     delegate.eventsBySlices(entityType, minSlice, maxSlice, offset).asJava
 
   override def sliceRanges(numberOfRanges: Int): util.List[Pair[Integer, Integer]] = {
-    import scala.jdk.CollectionConverters._
+    import pekko.util.ccompat.JavaConverters._
     delegate
       .sliceRanges(numberOfRanges)
       .map(range => Pair(Integer.valueOf(range.min), Integer.valueOf(range.max)))
@@ -110,14 +107,14 @@ final class R2dbcReadJournal(delegate: scaladsl.R2dbcReadJournal)
     delegate.currentPersistenceIds().asJava
 
   override def currentPersistenceIds(afterId: Optional[String], limit: Long): Source[String, NotUsed] =
-    delegate.currentPersistenceIds(afterId.toScala, limit).asJava
+    delegate.currentPersistenceIds(afterId.asScala, limit).asJava
 
   /**
    * Get the current persistence ids.
    *
    * Note: to reuse existing index, the actual query filters entity types based on persistence_id column and sql LIKE
    * operator. Hence the persistenceId must start with an entity type followed by default separator ("|") from
-   * [[pekko.persistence.typed.PersistenceId]].
+   * [[akka.persistence.typed.PersistenceId]].
    *
    * @param entityType
    *   The entity type name.
@@ -129,13 +126,13 @@ final class R2dbcReadJournal(delegate: scaladsl.R2dbcReadJournal)
    * @return
    *   A source containing all the persistence ids, limited as specified.
    */
-  def currentPersistenceIds(entityType: String, afterId: Optional[String], limit: Long): Source[String, NotUsed] =
-    delegate.currentPersistenceIds(entityType, afterId.toScala, limit).asJava
+  def currentPersistenceIds(entityType: String, afterId: Option[String], limit: Long): Source[String, NotUsed] =
+    delegate.currentPersistenceIds(entityType, afterId, limit).asJava
 
   override def timestampOf(persistenceId: String, sequenceNr: Long): CompletionStage[Optional[Instant]] =
-    delegate.timestampOf(persistenceId, sequenceNr).map(_.toJava)(ExecutionContext.parasitic).asJava
+    delegate.timestampOf(persistenceId, sequenceNr).map(_.asJava)(ExecutionContexts.parasitic).toJava
 
   override def loadEnvelope[Event](persistenceId: String, sequenceNr: Long): CompletionStage[EventEnvelope[Event]] =
-    delegate.loadEnvelope[Event](persistenceId, sequenceNr).asJava
+    delegate.loadEnvelope[Event](persistenceId, sequenceNr).toJava
 
 }

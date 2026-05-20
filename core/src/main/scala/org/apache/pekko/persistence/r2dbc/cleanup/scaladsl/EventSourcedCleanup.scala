@@ -8,7 +8,7 @@
  */
 
 /*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.cleanup.scaladsl
@@ -18,29 +18,23 @@ import scala.concurrent.Future
 import scala.util.Failure
 import scala.util.Success
 
-import org.apache.pekko
 import pekko.Done
 import pekko.actor.ClassicActorSystemProvider
 import pekko.actor.typed.ActorSystem
+import pekko.actor.typed.scaladsl.LoggerOps
 import pekko.annotation.ApiMayChange
 import pekko.annotation.InternalApi
 import pekko.persistence.SnapshotSelectionCriteria
-import pekko.persistence.r2dbc.CleanupSettings
-import pekko.persistence.r2dbc.JournalSettings
-import pekko.persistence.r2dbc.SnapshotSettings
+import pekko.persistence.r2dbc.ConnectionFactoryProvider
+import pekko.persistence.r2dbc.R2dbcSettings
 import pekko.persistence.r2dbc.journal.JournalDao
 import pekko.persistence.r2dbc.snapshot.SnapshotDao
-import com.typesafe.config.Config
 import org.slf4j.LoggerFactory
 
 /**
- * Scala API: Tool for deleting events and/or snapshots for a given list of `persistenceIds` without using persistent
- * actors.
- *
- * When running an operation with `EventSourcedCleanup` that deletes all events for a persistence id, the actor with
- * that persistence id must not be running! If the actor is restarted it would in that case be recovered to the wrong
- * state since the stored events have been deleted. Delete events before snapshot can still be used while the actor is
- * running.
+ * Scala API: Tool for deleting all events and/or snapshots for a given list of `persistenceIds` without using
+ * persistent actors. It's important that the actors with corresponding `persistenceId` are not running at the same time
+ * as using the tool.
  *
  * If `resetSequenceNumber` is `true` then the creating entity with the same `persistenceId` will start from 0.
  * Otherwise it will continue from the latest highest used sequence number.
@@ -51,19 +45,17 @@ import org.slf4j.LoggerFactory
  * When a list of `persistenceIds` are given they are deleted sequentially in the order of the list. It's possible to
  * parallelize the deletes by running several cleanup operations at the same time operating on different sets of
  * `persistenceIds`.
- *
- * @since 2.0.0
  */
 @ApiMayChange
 final class EventSourcedCleanup(systemProvider: ClassicActorSystemProvider, configPath: String) {
 
   def this(systemProvider: ClassicActorSystemProvider) =
-    this(systemProvider, "pekko.persistence.r2dbc.cleanup")
+    this(systemProvider, "akka.persistence.r2dbc.cleanup")
 
   /**
    * INTERNAL API
    */
-  @InternalApi private[pekko] implicit val system: ActorSystem[_] = {
+  @InternalApi private[akka] implicit val system: ActorSystem[_] = {
     import pekko.actor.typed.scaladsl.adapter._
     systemProvider.classicSystem.toTyped
   }
@@ -73,17 +65,13 @@ final class EventSourcedCleanup(systemProvider: ClassicActorSystemProvider, conf
   private val log = LoggerFactory.getLogger(classOf[EventSourcedCleanup])
 
   private val sharedConfigPath = configPath.replaceAll("""\.cleanup$""", "")
-  private val systemConfig: Config = system.settings.config
+  private val settings = R2dbcSettings(system.settings.config.getConfig(sharedConfigPath))
 
-  private val cleanupSettings = new CleanupSettings(systemConfig.getConfig(configPath))
-
-  private val journalConfig = systemConfig.getConfig(sharedConfigPath + ".journal")
-  private val journalSettings = JournalSettings(journalConfig)
-  private val journalDao = JournalDao.fromConfig(journalSettings, journalConfig)
-
-  private val snapshotConfig = systemConfig.getConfig(sharedConfigPath + ".snapshot")
-  private val snapshotSettings = SnapshotSettings(snapshotConfig)
-  private val snapshotDao = SnapshotDao.fromConfig(snapshotSettings, snapshotConfig)
+  private val connectionFactory =
+    ConnectionFactoryProvider(system).connectionFactoryFor(sharedConfigPath + ".connection-factory")
+  private val journalDao = new JournalDao(settings, connectionFactory)
+  private val snapshotDao =
+    new SnapshotDao(settings, connectionFactory)
 
   /**
    * Delete all events before a sequenceNr for the given persistence id. Snapshots are not deleted.
@@ -94,14 +82,8 @@ final class EventSourcedCleanup(systemProvider: ClassicActorSystemProvider, conf
    *   sequence nr (inclusive) to delete up to
    */
   def deleteEventsTo(persistenceId: String, toSequenceNr: Long): Future[Done] = {
-    log.debug("deleteEventsTo persistenceId [{}], toSequenceNr [{}]", persistenceId, toSequenceNr: java.lang.Long)
-    journalDao
-      .deleteEventsTo(
-        persistenceId,
-        toSequenceNr,
-        resetSequenceNumber = false,
-        cleanupSettings.eventsJournalDeleteBatchSize)
-      .map(_ => Done)
+    log.debug("deleteEventsTo persistenceId [{}], toSequenceNr [{}]", persistenceId, toSequenceNr)
+    journalDao.deleteEventsTo(persistenceId, toSequenceNr, resetSequenceNumber = false).map(_ => Done)
   }
 
   /**
@@ -109,11 +91,7 @@ final class EventSourcedCleanup(systemProvider: ClassicActorSystemProvider, conf
    */
   def deleteAllEvents(persistenceId: String, resetSequenceNumber: Boolean): Future[Done] = {
     journalDao
-      .deleteEventsTo(
-        persistenceId,
-        toSequenceNr = Long.MaxValue,
-        resetSequenceNumber,
-        cleanupSettings.eventsJournalDeleteBatchSize)
+      .deleteEventsTo(persistenceId, toSequenceNr = Long.MaxValue, resetSequenceNumber)
       .map(_ => Done)
   }
 
@@ -147,12 +125,13 @@ final class EventSourcedCleanup(systemProvider: ClassicActorSystemProvider, conf
   def cleanupBeforeSnapshot(persistenceId: String): Future[Done] = {
     snapshotDao.load(persistenceId, SnapshotSelectionCriteria.Latest).flatMap {
       case None           => Future.successful(Done)
-      case Some(snapshot) => deleteEventsTo(persistenceId, snapshot.seqNr)
+      case Some(snapshot) =>
+        deleteEventsTo(persistenceId, snapshot.seqNr)
     }
   }
 
   /**
-   * See single persistenceId overload for what is done for each persistence id.
+   * See single persistenceId overload for what is done for each persistence id
    */
   def cleanupBeforeSnapshot(persistenceIds: immutable.Seq[String]): Future[Done] = {
     foreach(persistenceIds, "cleanupBeforeSnapshot", pid => cleanupBeforeSnapshot(pid))
@@ -180,15 +159,15 @@ final class EventSourcedCleanup(systemProvider: ClassicActorSystemProvider, conf
       operationName: String,
       pidOperation: String => Future[Done]): Future[Done] = {
     val size = persistenceIds.size
-    log.info("Cleanup started {} of [{}] persistenceId.", operationName, size: java.lang.Integer)
+    log.info("Cleanup started {} of [{}] persistenceId.", operationName, size)
 
     def loop(remaining: List[String], n: Int): Future[Done] = {
       remaining match {
         case Nil         => Future.successful(Done)
         case pid :: tail =>
           pidOperation(pid).flatMap { _ =>
-            if (n % cleanupSettings.logProgressEvery == 0)
-              log.info("Cleanup {} [{}] of [{}].", operationName, n: java.lang.Integer, size: java.lang.Integer)
+            if (n % settings.cleanupSettings.logProgressEvery == 0)
+              log.infoN("Cleanup {} [{}] of [{}].", operationName, n, size)
             loop(tail, n + 1)
           }
       }
@@ -198,11 +177,12 @@ final class EventSourcedCleanup(systemProvider: ClassicActorSystemProvider, conf
 
     result.onComplete {
       case Success(_) =>
-        log.info("Cleanup completed {} of [{}] persistenceId.", operationName, size: java.lang.Integer)
+        log.info2("Cleanup completed {} of [{}] persistenceId.", operationName, size)
       case Failure(e) =>
-        log.error(s"Cleanup $operationName failed.", e)
+        log.error(s"Cleanup {$operationName} failed.", e)
     }
 
     result
   }
+
 }
