@@ -60,7 +60,8 @@ import org.slf4j.LoggerFactory
     system.settings.config.getConfig("pekko.persistence.r2dbc.journal.publish-events-dynamic"))
 
   private val sliceRanges = {
-    val numberOfTopics = system.settings.config.getInt("pekko.persistence.r2dbc.journal.publish-events-number-of-topics")
+    val numberOfTopics =
+      system.settings.config.getInt("pekko.persistence.r2dbc.journal.publish-events-number-of-topics")
     persistenceExt.sliceRanges(numberOfTopics)
   }
   private val sliceRangeLookup = new ConcurrentHashMap[Int, Range]
