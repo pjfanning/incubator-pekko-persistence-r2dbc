@@ -8,7 +8,7 @@
  */
 
 /*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.internal
@@ -19,7 +19,6 @@ import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
-import org.apache.pekko
 import pekko.actor.typed.ActorRef
 import pekko.actor.typed.ActorSystem
 import pekko.actor.typed.Extension
@@ -59,6 +58,14 @@ import org.slf4j.LoggerFactory
 
   private val settings = new PublishEventsDynamicSettings(
     system.settings.config.getConfig("pekko.persistence.r2dbc.journal.publish-events-dynamic"))
+
+  private val sliceRanges = {
+    val numberOfTopics =
+      system.settings.config.getInt("pekko.persistence.r2dbc.journal.publish-events-number-of-topics")
+    persistenceExt.sliceRanges(numberOfTopics)
+  }
+  private val sliceRangeLookup = new ConcurrentHashMap[Int, Range]
+
   private val throughputCollectIntervalMillis = settings.throughputCollectInterval.toMillis
   private val throughputThreshold = settings.throughputThreshold.toDouble
   private val throughputSampler =
@@ -74,8 +81,23 @@ import org.slf4j.LoggerFactory
       .narrow[Topic.Command[EventEnvelope[Event]]]
   }
 
-  private def topicName(entityType: String, slice: Int): String =
-    URLEncoder.encode(s"r2dbc-$entityType-$slice", StandardCharsets.UTF_8.name())
+  def eventTopics[Event](
+      entityType: String,
+      minSlice: Int,
+      maxSlice: Int): Set[ActorRef[Topic.Command[EventEnvelope[Event]]]] = {
+    (minSlice to maxSlice).map(eventTopic[Event](entityType, _)).toSet
+  }
+
+  private def topicName(entityType: String, slice: Int): String = {
+    val range = sliceRangeLookup.computeIfAbsent(
+      slice,
+      _ =>
+        sliceRanges
+          .find(_.contains(slice))
+          .getOrElse(throw new IllegalArgumentException(s"Slice [$slice] not found in " +
+            s"slice ranges [${sliceRanges.mkString(", ")}]")))
+    URLEncoder.encode(s"r2dbc-$entityType-${range.min}-${range.max}", StandardCharsets.UTF_8.name())
+  }
 
   def publish(pr: PersistentRepr, timestamp: Instant): Unit = {
 
@@ -109,7 +131,7 @@ import org.slf4j.LoggerFactory
 
       val offset = TimestampOffset(timestamp, timestamp, Map(pid -> pr.sequenceNr))
 
-      val (eventPayload, tags) = pr.payload match {
+      val (event, tags) = pr.payload match {
         case Tagged(payload, tags) =>
           (payload, tags)
         case other =>
@@ -120,7 +142,7 @@ import org.slf4j.LoggerFactory
         offset,
         pid,
         pr.sequenceNr,
-        Option(eventPayload),
+        Option(event),
         timestamp.toEpochMilli,
         pr.metadata,
         entityType,

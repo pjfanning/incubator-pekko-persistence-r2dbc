@@ -1,19 +1,10 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.state;
 
-import org.apache.pekko.persistence.r2dbc.state.javadsl.AdditionalColumn;
+import pekko.persistence.r2dbc.state.javadsl.AdditionalColumn;
 
 public class JavadslColumn extends AdditionalColumn<String, Integer> {
   @Override
@@ -33,6 +24,6 @@ public class JavadslColumn extends AdditionalColumn<String, Integer> {
     else if (upsert.value().equals("SKIP"))
       return AdditionalColumn.skip();
     else
-      return new AdditionalColumn.BindValue<>(upsert.value().length());
+      return new AdditionalColumn.BindValue(upsert.value().length());
   }
 }

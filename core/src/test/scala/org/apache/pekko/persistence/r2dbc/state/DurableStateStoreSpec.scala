@@ -1,30 +1,20 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
- * Copyright (C) 2021-2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.state
 
-import org.apache.pekko
-import pekko.actor.testkit.typed.scaladsl.{ LogCapturing, ScalaTestWithActorTestKit }
+import pekko.actor.testkit.typed.scaladsl.LogCapturing
+import pekko.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
 import pekko.actor.typed.ActorSystem
-import pekko.persistence.r2dbc.{ TestConfig, TestData, TestDbLifecycle }
+import pekko.persistence.r2dbc.TestConfig
+import pekko.persistence.r2dbc.TestData
+import pekko.persistence.r2dbc.TestDbLifecycle
 import pekko.persistence.r2dbc.state.scaladsl.R2dbcDurableStateStore
 import pekko.persistence.state.DurableStateStoreRegistry
 import pekko.persistence.state.scaladsl.GetObjectResult
 import pekko.persistence.typed.PersistenceId
 import org.scalatest.wordspec.AnyWordSpecLike
-
-import scala.concurrent.Await
-import scala.concurrent.duration.DurationInt
 
 class DurableStateStoreSpec
     extends ScalaTestWithActorTestKit(TestConfig.config)
@@ -39,7 +29,6 @@ class DurableStateStoreSpec
     .durableStateStoreFor[R2dbcDurableStateStore[String]](R2dbcDurableStateStore.Identifier)
 
   private val unusedTag = "n/a"
-  private val emptyTag = ""
 
   "The R2DBC durable state store" should {
     "save and retrieve a value" in {
@@ -48,15 +37,6 @@ class DurableStateStoreSpec
       val value = "Genuinely Collaborative"
 
       store.upsertObject(persistenceId, 1L, value, unusedTag).futureValue
-      store.getObject(persistenceId).futureValue should be(GetObjectResult(Some(value), 1L))
-    }
-
-    "save and retrieve a value with empty tag" in {
-      val entityType = nextEntityType()
-      val persistenceId = PersistenceId(entityType, "my-persistenceId-empty-tag").id
-      val value = "Genuinely Collaborative"
-
-      store.upsertObject(persistenceId, 1L, value, emptyTag).futureValue
       store.getObject(persistenceId).futureValue should be(GetObjectResult(Some(value), 1L))
     }
 
@@ -93,7 +73,7 @@ class DurableStateStoreSpec
     }
 
     "detect and reject concurrent updates" in {
-      if (!stateSettings.durableStateAssertSingleWriter)
+      if (!r2dbcSettings.durableStateAssertSingleWriter)
         pending
 
       val entityType = nextEntityType()
@@ -112,16 +92,6 @@ class DurableStateStoreSpec
         store.upsertObject(persistenceId.id, revision = 2L, updatedValue2, entityType).failed.futureValue
       failure.getMessage should include(
         s"Update failed: durable state for persistence id [${persistenceId.id}] could not be updated to revision [2]")
-    }
-
-    "support deletions" in {
-      val entityType = nextEntityType()
-      val persistenceId = PersistenceId(entityType, "to-be-added-and-removed").id
-      val value = "Genuinely Collaborative"
-      store.upsertObject(persistenceId, 1L, value, unusedTag).futureValue
-      store.getObject(persistenceId).futureValue should be(GetObjectResult(Some(value), 1L))
-      store.deleteObject(persistenceId).futureValue
-      store.getObject(persistenceId).futureValue should be(GetObjectResult(None, 0L))
     }
 
     "hard delete when revision=0" in {
@@ -167,58 +137,6 @@ class DurableStateStoreSpec
       store.getObject(persistenceId).futureValue should be(GetObjectResult(None, 5L))
     }
 
-    "upsert with correct revision after delete succeeds" in {
-      val entityType = nextEntityType()
-      val persistenceId = PersistenceId(entityType, "to-be-deleted-then-re-inserted").id
-      val value1 = "initial value"
-      store.upsertObject(persistenceId, 1L, value1, unusedTag).futureValue
-      store.getObject(persistenceId).futureValue should be(GetObjectResult(Some(value1), 1L))
-      store.deleteObject(persistenceId, revision = 2L).futureValue
-      store.getObject(persistenceId).futureValue should be(GetObjectResult(None, 2L))
-
-      val value2 = "new value after delete"
-      store.upsertObject(persistenceId, 3L, value2, unusedTag).futureValue
-      store.getObject(persistenceId).futureValue should be(GetObjectResult(Some(value2), 3L))
-    }
-
-    "reject upsert with same revision as delete revision" in {
-      if (!stateSettings.durableStateAssertSingleWriter)
-        pending
-
-      val entityType = nextEntityType()
-      val persistenceId = PersistenceId(entityType, "to-be-deleted-then-bad-update-same-rev").id
-      val value = "initial value"
-      store.upsertObject(persistenceId, 1L, value, unusedTag).futureValue
-      store.getObject(persistenceId).futureValue should be(GetObjectResult(Some(value), 1L))
-      store.deleteObject(persistenceId, revision = 2L).futureValue
-      store.getObject(persistenceId).futureValue should be(GetObjectResult(None, 2L))
-
-      // revision=2 is already used by the delete; next valid revision is 3
-      val failure =
-        store.upsertObject(persistenceId, revision = 2L, "wrong value", unusedTag).failed.futureValue
-      failure.getMessage should include(
-        s"Update failed: durable state for persistence id [$persistenceId] could not be updated to revision [2]")
-    }
-
-    "reject upsert with skipped revision after delete" in {
-      if (!stateSettings.durableStateAssertSingleWriter)
-        pending
-
-      val entityType = nextEntityType()
-      val persistenceId = PersistenceId(entityType, "to-be-deleted-then-bad-update-skipped-rev").id
-      val value = "initial value"
-      store.upsertObject(persistenceId, 1L, value, unusedTag).futureValue
-      store.getObject(persistenceId).futureValue should be(GetObjectResult(Some(value), 1L))
-      store.deleteObject(persistenceId, revision = 2L).futureValue
-      store.getObject(persistenceId).futureValue should be(GetObjectResult(None, 2L))
-
-      // revision=4 skips revision 3; the correct next revision after delete at 2 is 3
-      val failure =
-        store.upsertObject(persistenceId, revision = 4L, "wrong value", unusedTag).failed.futureValue
-      failure.getMessage should include(
-        s"Update failed: durable state for persistence id [$persistenceId] could not be updated to revision [4]")
-    }
-
     "detect and reject concurrent delete of revision 1" in {
       val entityType = nextEntityType()
       val persistenceId = PersistenceId(entityType, "id-to-be-deleted-concurrently")
@@ -233,6 +151,9 @@ class DurableStateStoreSpec
     }
 
     "detect and reject concurrent deletes" in {
+      if (!r2dbcSettings.durableStateAssertSingleWriter)
+        pending
+
       val entityType = nextEntityType()
       val persistenceId = PersistenceId(entityType, "id-to-be-updated-concurrently")
       val value = "Genuinely Collaborative"

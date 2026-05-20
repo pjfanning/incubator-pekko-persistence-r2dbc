@@ -8,12 +8,12 @@
  */
 
 /*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.state
 
-import org.apache.pekko.annotation.ApiMayChange
+import pekko.annotation.ApiMayChange
 
 @ApiMayChange
 final class ChangeHandlerException(message: String, cause: Throwable) extends RuntimeException(message, cause)

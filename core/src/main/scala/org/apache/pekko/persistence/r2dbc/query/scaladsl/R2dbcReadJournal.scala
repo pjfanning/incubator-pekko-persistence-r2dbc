@@ -8,26 +8,23 @@
  */
 
 /*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.query.scaladsl
 
 import java.time.Instant
 import java.time.{ Duration => JDuration }
-
 import scala.collection.immutable
 import scala.collection.mutable
 import scala.concurrent.Future
 import scala.concurrent.duration.FiniteDuration
-import com.typesafe.config.Config
-import org.apache.pekko
 import pekko.NotUsed
 import pekko.actor.ExtendedActorSystem
-import pekko.actor.typed.ActorSystem
 import pekko.actor.typed.pubsub.Topic
+import pekko.actor.typed.scaladsl.LoggerOps
 import pekko.actor.typed.scaladsl.adapter._
-import pekko.annotation.InternalApi
+import pekko.annotation.{ ApiMayChange, InternalApi }
 import pekko.persistence.Persistence
 import pekko.persistence.query.Offset
 import pekko.persistence.query.TimestampOffset
@@ -42,17 +39,20 @@ import pekko.persistence.query.typed.scaladsl.{
   LoadEventQuery
 }
 import pekko.persistence.query.{ EventEnvelope => ClassicEventEnvelope }
-import pekko.persistence.r2dbc.QuerySettings
+import pekko.persistence.r2dbc.ConnectionFactoryProvider
+import pekko.persistence.r2dbc.R2dbcSettings
 import pekko.persistence.r2dbc.internal.BySliceQuery
 import pekko.persistence.r2dbc.internal.ContinuousQuery
 import pekko.persistence.r2dbc.internal.EnvelopeOrigin
 import pekko.persistence.r2dbc.internal.PubSub
+import pekko.persistence.r2dbc.journal.JournalDao
 import pekko.persistence.r2dbc.journal.JournalDao.SerializedJournalRow
 import pekko.persistence.typed.PersistenceId
 import pekko.serialization.SerializationExtension
 import pekko.stream.OverflowStrategy
 import pekko.stream.scaladsl.Flow
 import pekko.stream.scaladsl.Source
+import com.typesafe.config.Config
 import org.slf4j.LoggerFactory
 
 object R2dbcReadJournal {
@@ -79,20 +79,24 @@ final class R2dbcReadJournal(system: ExtendedActorSystem, config: Config, cfgPat
   import R2dbcReadJournal.PersistenceIdsQueryState
 
   private val log = LoggerFactory.getLogger(getClass)
-  private val settings = QuerySettings(config)
+  private val sharedConfigPath = cfgPath.replaceAll("""\.query$""", "")
+  private val settings = R2dbcSettings(system.settings.config.getConfig(sharedConfigPath))
 
-  private implicit val typedSystem: ActorSystem[_] = system.toTyped
+  private val typedSystem = system.toTyped
   import typedSystem.executionContext
   private val serialization = SerializationExtension(system)
   private val persistenceExt = Persistence(system)
-
-  private val queryDao = QueryDao.fromConfig(settings, config)
+  private val connectionFactory = ConnectionFactoryProvider(typedSystem)
+    .connectionFactoryFor(sharedConfigPath + ".connection-factory")
+  private val queryDao =
+    new QueryDao(settings, connectionFactory)(typedSystem.executionContext, typedSystem)
 
   private val _bySlice: BySliceQuery[SerializedJournalRow, EventEnvelope[Any]] = {
     val createEnvelope: (TimestampOffset, SerializedJournalRow) => EventEnvelope[Any] = (offset, row) => {
       val event = row.payload.map(payload => serialization.deserialize(payload, row.serId, row.serManifest).get)
       val metadata = row.metadata.map(meta => serialization.deserialize(meta.payload, meta.serId, meta.serManifest).get)
       val source = if (event.isDefined) EnvelopeOrigin.SourceQuery else EnvelopeOrigin.SourceBacktracking
+
       new EventEnvelope(
         offset,
         row.persistenceId,
@@ -114,6 +118,8 @@ final class R2dbcReadJournal(system: ExtendedActorSystem, config: Config, cfgPat
 
   private def bySlice[Event]: BySliceQuery[SerializedJournalRow, EventEnvelope[Event]] =
     _bySlice.asInstanceOf[BySliceQuery[SerializedJournalRow, EventEnvelope[Event]]]
+
+  private val journalDao = new JournalDao(settings, connectionFactory)(typedSystem.executionContext, typedSystem)
 
   def extractEntityTypeFromPersistenceId(persistenceId: String): String =
     PersistenceId.extractEntityType(persistenceId)
@@ -175,23 +181,25 @@ final class R2dbcReadJournal(system: ExtendedActorSystem, config: Config, cfgPat
           .actorRef[EventEnvelope[Event]](
             completionMatcher = PartialFunction.empty,
             failureMatcher = PartialFunction.empty,
-            bufferSize = settings.bufferSize,
-            // dropHead drops the oldest buffered event when full; any dropped pub/sub events are
-            // recovered from the database source which is merged below, and deduplication handles
-            // any events received via both paths.
-            // OverflowStrategy.dropNew is long deprecated and removed in Pekko 2.0.0.
-            overflowStrategy = OverflowStrategy.dropHead)
+            bufferSize = settings.querySettings.bufferSize,
+            overflowStrategy = OverflowStrategy.dropNew)
           .mapMaterializedValue { ref =>
-            (minSlice to maxSlice).foreach { slice =>
+            pubSub.eventTopics[Event](entityType, minSlice, maxSlice).foreach { topic =>
               import pekko.actor.typed.scaladsl.adapter._
-              pubSub.eventTopic(entityType, slice) ! Topic.Subscribe(ref.toTyped[EventEnvelope[Event]])
+              topic ! Topic.Subscribe(ref.toTyped[EventEnvelope[Event]])
             }
+          }
+          .filter { env =>
+            val slice = sliceForPersistenceId(env.persistenceId)
+            minSlice <= slice && slice <= maxSlice
           }
       dbSource
         .mergePrioritized(pubSubSource, leftPriority = 1, rightPriority = 10)
-        .via(skipPubSubTooFarAhead(settings.backtrackingEnabled,
-          JDuration.ofMillis(settings.backtrackingWindow.toMillis)))
-        .via(deduplicate(settings.deduplicateCapacity))
+        .via(
+          skipPubSubTooFarAhead(
+            settings.querySettings.backtrackingEnabled,
+            JDuration.ofMillis(settings.querySettings.backtrackingWindow.toMillis)))
+        .via(deduplicate(settings.querySettings.deduplicateCapacity))
     } else
       dbSource
   }
@@ -256,20 +264,20 @@ final class R2dbcReadJournal(system: ExtendedActorSystem, config: Config, cfgPat
                   latestBacktracking = t.timestamp
                   env :: Nil
                 } else if (EnvelopeOrigin.fromPubSub(env) && latestBacktracking == Instant.EPOCH) {
-                  log.trace(
+                  log.trace2(
                     "Dropping pubsub event for persistenceId [{}] seqNr [{}] because no event from backtracking yet.",
                     env.persistenceId,
-                    env.sequenceNr: java.lang.Long)
+                    env.sequenceNr)
                   Nil
                 } else if (EnvelopeOrigin.fromPubSub(env) &&
                   JDuration
                     .between(latestBacktracking, t.timestamp)
                     .compareTo(maxAheadOfBacktracking) > 0) {
                   // drop from pubsub when too far ahead from backtracking
-                  log.debug(
+                  log.debug2(
                     "Dropping pubsub event for persistenceId [{}] seqNr [{}] because too far ahead of backtracking.",
                     env.persistenceId,
-                    env.sequenceNr: java.lang.Long)
+                    env.sequenceNr)
                   Nil
                 } else {
                   env :: Nil
@@ -288,6 +296,7 @@ final class R2dbcReadJournal(system: ExtendedActorSystem, config: Config, cfgPat
     internalCurrentEventsByPersistenceId(persistenceId, fromSequenceNr, toSequenceNr)
       .map(deserializeRow)
 
+  @ApiMayChange
   override def currentEventsByPersistenceIdTyped[Event](
       persistenceId: String,
       fromSequenceNr: Long,
@@ -303,14 +312,57 @@ final class R2dbcReadJournal(system: ExtendedActorSystem, config: Config, cfgPat
       fromSequenceNr: Long,
       toSequenceNr: Long): Source[SerializedJournalRow, NotUsed] = {
 
+    def updateState(state: ByPersistenceIdState, row: SerializedJournalRow): ByPersistenceIdState =
+      state.copy(rowCount = state.rowCount + 1, latestSeqNr = row.seqNr)
+
+    def nextQuery(
+        state: ByPersistenceIdState,
+        highestSeqNr: Long): (ByPersistenceIdState, Option[Source[SerializedJournalRow, NotUsed]]) = {
+      if (state.queryCount == 0L || state.rowCount >= settings.querySettings.bufferSize) {
+        val newState = state.copy(rowCount = 0, queryCount = state.queryCount + 1)
+
+        if (state.queryCount != 0 && log.isDebugEnabled())
+          log.debugN(
+            "currentEventsByPersistenceId query [{}] for persistenceId [{}], from [{}] to [{}]. Found [{}] rows in previous query.",
+            state.queryCount,
+            persistenceId,
+            state.latestSeqNr + 1,
+            highestSeqNr,
+            state.rowCount)
+
+        newState -> Some(
+          queryDao
+            .eventsByPersistenceId(persistenceId, state.latestSeqNr + 1, highestSeqNr))
+      } else {
+        log.debugN(
+          "currentEventsByPersistenceId query [{}] for persistenceId [{}] completed. Found [{}] rows in previous query.",
+          state.queryCount,
+          persistenceId,
+          state.rowCount)
+
+        state -> None
+      }
+    }
+
+    if (log.isDebugEnabled())
+      log.debugN(
+        "currentEventsByPersistenceId query for persistenceId [{}], from [{}] to [{}].",
+        persistenceId,
+        fromSequenceNr,
+        toSequenceNr)
+
     val highestSeqNrFut =
-      if (toSequenceNr == Long.MaxValue) queryDao.readHighestSequenceNr(persistenceId, fromSequenceNr)
+      if (toSequenceNr == Long.MaxValue) journalDao.readHighestSequenceNr(persistenceId, fromSequenceNr)
       else Future.successful(toSequenceNr)
 
     Source
       .futureSource[SerializedJournalRow, NotUsed] {
         highestSeqNrFut.map { highestSeqNr =>
-          queryDao.internalCurrentEventsByPersistenceId(persistenceId, fromSequenceNr, highestSeqNr)
+          ContinuousQuery[ByPersistenceIdState, SerializedJournalRow](
+            initialState = ByPersistenceIdState(0, 0, latestSeqNr = fromSequenceNr - 1),
+            updateState = updateState,
+            delayNextQuery = _ => None,
+            nextQuery = state => nextQuery(state, highestSeqNr))
         }
       }
       .mapMaterializedValue(_ => NotUsed)
@@ -340,6 +392,7 @@ final class R2dbcReadJournal(system: ExtendedActorSystem, config: Config, cfgPat
     internalEventsByPersistenceId(persistenceId, fromSequenceNr, toSequenceNr)
       .map(deserializeRow)
 
+  @ApiMayChange
   override def eventsByPersistenceIdTyped[Event](
       persistenceId: String,
       fromSequenceNr: Long,
@@ -360,15 +413,15 @@ final class R2dbcReadJournal(system: ExtendedActorSystem, config: Config, cfgPat
     def delayNextQuery(state: ByPersistenceIdState): Option[FiniteDuration] = {
       val delay = ContinuousQuery.adjustNextDelay(
         state.rowCount,
-        settings.bufferSize,
-        settings.refreshInterval)
+        settings.querySettings.bufferSize,
+        settings.querySettings.refreshInterval)
 
       delay.foreach { d =>
-        log.debug(
+        log.debugN(
           "eventsByPersistenceId query [{}] for persistenceId [{}] delay next [{}] ms.",
-          state.queryCount: java.lang.Integer,
+          state.queryCount,
           persistenceId,
-          d.toMillis: java.lang.Long)
+          d.toMillis)
       }
 
       delay
@@ -377,20 +430,20 @@ final class R2dbcReadJournal(system: ExtendedActorSystem, config: Config, cfgPat
     def nextQuery(
         state: ByPersistenceIdState): (ByPersistenceIdState, Option[Source[SerializedJournalRow, NotUsed]]) = {
       if (state.latestSeqNr >= toSequenceNr) {
-        log.debug(
+        log.debugN(
           "eventsByPersistenceId query [{}] for persistenceId [{}] completed. Found [{}] rows in previous query.",
-          state.queryCount: java.lang.Integer,
+          state.queryCount,
           persistenceId,
-          state.rowCount: java.lang.Integer)
+          state.rowCount)
         state -> None
       } else {
         val newState = state.copy(rowCount = 0, queryCount = state.queryCount + 1)
 
-        log.debug(
+        log.debugN(
           "eventsByPersistenceId query [{}] for persistenceId [{}], from [{}]. Found [{}] rows in previous query.",
-          newState.queryCount: java.lang.Integer,
+          newState.queryCount,
           persistenceId,
-          state.rowCount: java.lang.Integer)
+          state.rowCount)
 
         newState ->
         Some(
@@ -463,7 +516,7 @@ final class R2dbcReadJournal(system: ExtendedActorSystem, config: Config, cfgPat
     queryDao.persistenceIds(entityType, afterId, limit)
 
   override def currentPersistenceIds(): Source[String, NotUsed] = {
-    import settings.persistenceIdsBufferSize
+    import settings.querySettings.persistenceIdsBufferSize
     def updateState(state: PersistenceIdsQueryState, pid: String): PersistenceIdsQueryState =
       state.copy(rowCount = state.rowCount + 1, latestPid = pid)
 
@@ -472,11 +525,11 @@ final class R2dbcReadJournal(system: ExtendedActorSystem, config: Config, cfgPat
         val newState = state.copy(rowCount = 0, queryCount = state.queryCount + 1)
 
         if (state.queryCount != 0 && log.isDebugEnabled())
-          log.debug(
+          log.debugN(
             "persistenceIds query [{}] after [{}]. Found [{}] rows in previous query.",
-            state.queryCount: java.lang.Integer,
+            state.queryCount,
             state.latestPid,
-            state.rowCount: java.lang.Integer)
+            state.rowCount)
 
         newState -> Some(
           queryDao
@@ -499,4 +552,5 @@ final class R2dbcReadJournal(system: ExtendedActorSystem, config: Config, cfgPat
       nextQuery = state => nextQuery(state))
       .mapMaterializedValue(_ => NotUsed)
   }
+
 }

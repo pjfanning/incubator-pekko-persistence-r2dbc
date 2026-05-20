@@ -1,19 +1,9 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.query
 
-import org.apache.pekko
 import pekko.Done
 import pekko.NotUsed
 import pekko.actor.testkit.typed.scaladsl.LogCapturing
@@ -22,6 +12,7 @@ import pekko.actor.typed.ActorSystem
 import pekko.persistence.query.PersistenceQuery
 import pekko.persistence.query.TimestampOffset
 import pekko.persistence.query.{ EventEnvelope => ClassicEventEnvelope }
+import pekko.persistence.r2dbc.R2dbcSettings
 import pekko.persistence.r2dbc.TestActors
 import pekko.persistence.r2dbc.TestActors.Persister
 import pekko.persistence.r2dbc.TestActors.Persister.PersistWithAck
@@ -31,7 +22,7 @@ import pekko.persistence.r2dbc.TestDbLifecycle
 import pekko.persistence.r2dbc.query.scaladsl.R2dbcReadJournal
 import pekko.persistence.typed.PersistenceId
 import pekko.persistence.typed.internal.ReplicatedEventMetadata
-import pekko.stream.scaladsl.Source
+import pekko.stream.scaladsl.{ Sink, Source }
 import pekko.stream.testkit.TestSubscriber
 import pekko.stream.testkit.scaladsl.TestSink
 import org.scalatest.wordspec.AnyWordSpecLike
@@ -51,6 +42,7 @@ class EventsByPersistenceIdSpec
   import EventsByPersistenceIdSpec._
 
   override def typedSystem: ActorSystem[_] = system
+  private val settings = new R2dbcSettings(system.settings.config.getConfig("pekko.persistence.r2dbc"))
 
   private val query = PersistenceQuery(testKit.system).readJournalFor[R2dbcReadJournal](R2dbcReadJournal.Identifier)
 
@@ -188,6 +180,33 @@ class EventsByPersistenceIdSpec
 
         assertFinished(sub)
       }
+    }
+  }
+
+  "Typed versions of query" should {
+    "include tags" in {
+      val probe = testKit.createTestProbe[Done]()
+      val entityType = nextEntityType()
+      val entityId = "entity-1"
+      val pid = PersistenceId(entityType, entityId)
+
+      val persister = testKit.spawn(TestActors.Persister(pid, tags = Set("tag")))
+      persister ! Persister.PersistWithAck("e-1", probe.ref)
+      probe.expectMessage(Done)
+
+      val events = query
+        .currentEventsByPersistenceIdTyped[String](pid.id, 0L, Long.MaxValue)
+        .runWith(Sink.seq)
+        .futureValue
+
+      events should have size 1
+      events.head.tags should ===(Set("tag"))
+
+      val event = query
+        .eventsByPersistenceIdTyped[String](pid.id, 0L, Long.MaxValue)
+        .runWith(Sink.head)
+        .futureValue
+      event.tags should ===(Set("tag"))
     }
   }
 

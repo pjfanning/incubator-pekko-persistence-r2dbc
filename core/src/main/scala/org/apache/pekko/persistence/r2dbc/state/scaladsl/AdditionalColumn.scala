@@ -8,14 +8,13 @@
  */
 
 /*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.state.scaladsl
 
 import scala.reflect.ClassTag
 
-import org.apache.pekko
 import pekko.annotation.ApiMayChange
 import pekko.annotation.InternalApi
 
@@ -39,8 +38,7 @@ object AdditionalColumn {
       classOf[Double] -> classOf[java.lang.Double],
       classOf[Byte] -> classOf[java.lang.Byte],
       classOf[Short] -> classOf[java.lang.Short],
-      classOf[Char] -> classOf[java.lang.Character],
-      classOf[Boolean] -> classOf[java.lang.Boolean])
+      classOf[Char] -> classOf[java.lang.Character])
 }
 
 /**

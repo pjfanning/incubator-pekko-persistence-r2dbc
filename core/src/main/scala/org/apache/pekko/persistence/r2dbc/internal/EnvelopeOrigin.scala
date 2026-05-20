@@ -13,8 +13,8 @@
 
 package org.apache.pekko.persistence.r2dbc.internal
 
-import org.apache.pekko
 import pekko.annotation.InternalStableApi
+import pekko.persistence.query.UpdatedDurableState
 import pekko.persistence.query.typed.EventEnvelope
 
 /**
@@ -31,6 +31,9 @@ import pekko.persistence.query.typed.EventEnvelope
   def fromBacktracking(env: EventEnvelope[_]): Boolean =
     env.source == SourceBacktracking
 
+  def fromBacktracking(change: UpdatedDurableState[_]): Boolean =
+    change.value == null
+
   def fromPubSub(env: EventEnvelope[_]): Boolean =
     env.source == SourcePubSub
 
@@ -39,4 +42,5 @@ import pekko.persistence.query.typed.EventEnvelope
       case e: EventEnvelope[_] => e.filtered
       case _                   => false
     }
+
 }

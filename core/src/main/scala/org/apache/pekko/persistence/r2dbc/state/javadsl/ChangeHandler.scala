@@ -8,14 +8,13 @@
  */
 
 /*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.state.javadsl
 
 import java.util.concurrent.CompletionStage
 
-import org.apache.pekko
 import pekko.Done
 import pekko.annotation.ApiMayChange
 import pekko.persistence.query.DurableStateChange

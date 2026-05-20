@@ -8,24 +8,27 @@
  */
 
 /*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.query
 
-import org.apache.pekko
 import pekko.actor.ExtendedActorSystem
 import pekko.persistence.query.ReadJournalProvider
+import pekko.persistence.query.scaladsl.ReadJournal
 import com.typesafe.config.Config
 
 final class R2dbcReadJournalProvider(system: ExtendedActorSystem, config: Config, cfgPath: String)
     extends ReadJournalProvider {
-  private val readJournalScala: scaladsl.R2dbcReadJournal =
+
+  private val scaladslReadJournalInstance =
     new scaladsl.R2dbcReadJournal(system, config, cfgPath)
 
-  private val readJournalJava: javadsl.R2dbcReadJournal = new javadsl.R2dbcReadJournal(readJournalScala)
+  override def scaladslReadJournal(): ReadJournal = scaladslReadJournalInstance
 
-  override def scaladslReadJournal(): scaladsl.R2dbcReadJournal = readJournalScala
+  private val javadslReadJournalInstance =
+    new javadsl.R2dbcReadJournal(scaladslReadJournalInstance)
 
-  override def javadslReadJournal(): javadsl.R2dbcReadJournal = readJournalJava
+  override def javadslReadJournal(): javadsl.R2dbcReadJournal = javadslReadJournalInstance
+
 }

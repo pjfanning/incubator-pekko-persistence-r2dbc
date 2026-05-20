@@ -1,14 +1,5 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.state
@@ -18,7 +9,6 @@ import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
-import org.apache.pekko
 import pekko.Done
 import pekko.actor.testkit.typed.scaladsl.LogCapturing
 import pekko.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
@@ -51,13 +41,6 @@ object DurableStateStoreChangeHandlerSpec {
     """)
     .withFallback(TestConfig.config)
 
-  val dialect: String = config.getString("pekko.persistence.r2dbc.dialect")
-
-  // MySQL uses ? as parameter markers; Postgres/Yugabyte use $1, $2, $3
-  private val insertSql: String =
-    if (dialect == "mysql") "insert into changes_test (pid, rev, value) values (?, ?, ?)"
-    else sql"insert into changes_test (pid, rev, value) values (?, ?, ?)"
-
   class Handler(system: ActorSystem[_]) extends ChangeHandler[String] {
     private implicit val ec: ExecutionContext = system.executionContext
 
@@ -70,7 +53,7 @@ object DurableStateStoreChangeHandlerSpec {
             session
               .updateOne(
                 session
-                  .createStatement(insertSql)
+                  .createStatement(sql"insert into changes_test (pid, rev, value) values (?, ?, ?)")
                   .bind(0, upd.persistenceId)
                   .bind(1, upd.revision)
                   .bind(2, upd.value))
@@ -80,7 +63,7 @@ object DurableStateStoreChangeHandlerSpec {
           session
             .updateOne(
               session
-                .createStatement(insertSql)
+                .createStatement(sql"insert into changes_test (pid, rev, value) values (?, ?, ?)")
                 .bind(0, del.persistenceId)
                 .bind(1, del.revision)
                 .bindNull(2, classOf[String]))
@@ -105,7 +88,7 @@ class DurableStateStoreChangeHandlerSpec
   override def beforeAll(): Unit = {
     super.beforeAll()
     Await.result(
-      r2dbcExecutor.executeDdl("beforeAll create changes_test")(
+      r2dbcExecutor.executeDdl("beforeAll create durable_state_test")(
         _.createStatement(
           s"create table if not exists $anotherTable (pid varchar(256), rev bigint, value varchar(256))")),
       20.seconds)

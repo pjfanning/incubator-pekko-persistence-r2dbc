@@ -1,14 +1,5 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
- * Copyright (C) 2021-2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.state
@@ -16,7 +7,6 @@ package org.apache.pekko.persistence.r2dbc.state
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
-import org.apache.pekko
 import pekko.Done
 import pekko.NotUsed
 import pekko.actor.testkit.typed.scaladsl.FishingOutcomes
@@ -30,6 +20,7 @@ import pekko.persistence.query.NoOffset
 import pekko.persistence.query.Offset
 import pekko.persistence.query.TimestampOffset
 import pekko.persistence.query.UpdatedDurableState
+import pekko.persistence.r2dbc.R2dbcSettings
 import pekko.persistence.r2dbc.TestActors
 import pekko.persistence.r2dbc.TestActors.DurableStatePersister.DeleteWithAck
 import pekko.persistence.r2dbc.TestActors.DurableStatePersister.Persist
@@ -72,6 +63,7 @@ class DurableStateBySliceSpec
   import DurableStateBySliceSpec._
 
   override def typedSystem: ActorSystem[_] = system
+  private val settings = new R2dbcSettings(system.settings.config.getConfig("pekko.persistence.r2dbc"))
 
   private val query = DurableStateStoreRegistry(testKit.system)
     .durableStateStoreFor[R2dbcDurableStateStore[String]](R2dbcDurableStateStore.Identifier)
@@ -179,16 +171,19 @@ class DurableStateBySliceSpec
       }
 
       "emit DeletedDurableState for latest deleted state" in new Setup {
-        val timeout = 10.seconds
         for (i <- 1 to 3) {
           persister ! PersistWithAck(s"s-$i", probe.ref)
-          probe.expectMessage(timeout, Done)
+          probe.expectMessage(10.seconds, Done)
         }
 
-        // Use store directly to ensure delete is committed before query runs.
-        // (Effect.delete() in Pekko DurableStateBehavior is fire-and-forget: side effects
-        // like thenRun fire before the DB write completes, creating a race for Current queries.)
-        query.deleteObject(persistenceId, 4L).futureValue
+        persister ! DeleteWithAck(probe.ref)
+        probe.expectMessage(10.seconds, Done)
+
+        // FIXME can be removed when updating to Akka 2.8, issue https://github.com/akka/akka/pull/31753
+        if (queryType == queryType) {
+          // let the delete be written to the database
+          Thread.sleep(3000)
+        }
 
         val deletedDurableStateProbe = createTestProbe[DeletedDurableState[String]]()
 
@@ -198,7 +193,7 @@ class DurableStateBySliceSpec
             .via(killSwitch.flow)
             .runWith(Sink.foreach(deletedDurableStateProbe.ref.tell))
 
-        deletedDurableStateProbe.receiveMessage(timeout).revision shouldBe 4
+        deletedDurableStateProbe.receiveMessage().revision shouldBe 4
         assertFinished(updatedDurableStateProbe, done)
         killSwitch.shutdown()
       }
@@ -208,7 +203,7 @@ class DurableStateBySliceSpec
   // tests just relevant for current query
   "Current changesBySlices" should {
     "filter states with the same timestamp based on seen sequence nrs" in new Setup {
-      persister ! PersistWithAck("s-1", probe.ref)
+      persister ! PersistWithAck(s"s-1", probe.ref)
       probe.expectMessage(Done)
       val singleState: UpdatedDurableState[String] =
         query
@@ -226,7 +221,7 @@ class DurableStateBySliceSpec
     }
 
     "not filter states with the same timestamp based on sequence nrs" in new Setup {
-      persister ! PersistWithAck("s-1", probe.ref)
+      persister ! PersistWithAck(s"s-1", probe.ref)
       probe.expectMessage(Done)
       val singleState: UpdatedDurableState[String] =
         query
@@ -289,7 +284,7 @@ class DurableStateBySliceSpec
             case u: UpdatedDurableState[String] => updatedDurableStateProbe.ref.tell(u)
             case u: DeletedDurableState[String] => deletedDurableStateProbe.ref.tell(u)
           })
-      fishForState("s-19", updatedDurableStateProbe).last.revision shouldBe 19
+      fishForState(s"s-19", updatedDurableStateProbe).last.revision shouldBe 19
 
       persister ! DeleteWithAck(probe.ref)
       probe.expectMessage(Done)
@@ -299,7 +294,7 @@ class DurableStateBySliceSpec
         persister ! PersistWithAck(s"s-$i", probe.ref)
         probe.expectMessage(Done)
       }
-      fishForState("s-40", updatedDurableStateProbe).last.revision shouldBe 40
+      fishForState(s"s-40", updatedDurableStateProbe).last.revision shouldBe 40
 
       persister ! DeleteWithAck(probe.ref)
       probe.expectMessage(Done)

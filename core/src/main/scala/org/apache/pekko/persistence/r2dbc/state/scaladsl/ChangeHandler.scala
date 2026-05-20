@@ -8,14 +8,13 @@
  */
 
 /*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.state.scaladsl
 
 import scala.concurrent.Future
 
-import org.apache.pekko
 import pekko.Done
 import pekko.annotation.ApiMayChange
 import pekko.persistence.query.DurableStateChange
@@ -30,9 +29,9 @@ trait ChangeHandler[A] {
    *
    * The `process` method is invoked for each `DurableStateChange`. Each time a new `Connection` is passed with a new
    * open transaction. You can use `createStatement`, `update` and other methods provided by the [[R2dbcSession]]. The
-   * results of several statements can be combined with `Future` composition. The transaction will be automatically
-   * committed or rolled back when the returned `Future` is completed. Note that an exception here will abort the
-   * transaction and fail the upsert or delete.
+   * results of several statements can be combined with `CompletionStage` composition (e.g. `thenCompose`). The
+   * transaction will be automatically committed or rolled back when the returned `CompletionStage` is completed. Note
+   * that an exception here will abort the transaction and fail the upsert or delete.
    *
    * The `ChangeHandler` should be implemented as a stateless function without mutable state because the same
    * `ChangeHandler` instance may be invoked concurrently for different entities. For a specific entity (persistenceId)

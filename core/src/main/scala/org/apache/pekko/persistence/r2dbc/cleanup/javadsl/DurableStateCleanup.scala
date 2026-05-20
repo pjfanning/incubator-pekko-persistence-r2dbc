@@ -8,7 +8,7 @@
  */
 
 /*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.cleanup.javadsl
@@ -16,14 +16,13 @@ package org.apache.pekko.persistence.r2dbc.cleanup.javadsl
 import java.util.concurrent.CompletionStage
 import java.util.{ List => JList }
 
-import scala.jdk.CollectionConverters._
-import scala.jdk.FutureConverters._
+import scala.collection.JavaConverters._
+import scala.compat.java8.FutureConverters._
 
-import org.apache.pekko
 import pekko.Done
 import pekko.actor.ClassicActorSystemProvider
 import pekko.annotation.ApiMayChange
-import pekko.persistence.r2dbc.cleanup.{ scaladsl => s }
+import pekko.persistence.r2dbc.cleanup.scaladsl
 
 /**
  * Java API: Tool for deleting durable state for a given list of `persistenceIds` without using `DurableStateBehavior`
@@ -39,14 +38,12 @@ import pekko.persistence.r2dbc.cleanup.{ scaladsl => s }
  * When a list of `persistenceIds` are given they are deleted sequentially in the order of the list. It's possible to
  * parallelize the deletes by running several cleanup operations at the same time operating on different sets of
  * `persistenceIds`.
- *
- * @since 2.0.0
  */
 @ApiMayChange
-final class DurableStateCleanup private (delegate: s.DurableStateCleanup) {
+final class DurableStateCleanup private (delegate: scaladsl.DurableStateCleanup) {
 
   def this(systemProvider: ClassicActorSystemProvider, configPath: String) =
-    this(new s.DurableStateCleanup(systemProvider, configPath))
+    this(new scaladsl.DurableStateCleanup(systemProvider, configPath))
 
   def this(systemProvider: ClassicActorSystemProvider) =
     this(systemProvider, "pekko.persistence.r2dbc.cleanup")
@@ -54,12 +51,15 @@ final class DurableStateCleanup private (delegate: s.DurableStateCleanup) {
   /**
    * Delete the state related to one single `persistenceId`.
    */
-  def deleteState(persistenceId: String, resetRevisionNumber: Boolean): CompletionStage[Done] =
-    delegate.deleteState(persistenceId, resetRevisionNumber).asJava
+  def deleteState(persistenceId: String, resetRevisionNumber: Boolean): CompletionStage[Done] = {
+    delegate.deleteState(persistenceId, resetRevisionNumber).toJava
+  }
 
   /**
    * Delete all states related to the given list of `persistenceIds`.
    */
-  def deleteStates(persistenceIds: JList[String], resetRevisionNumber: Boolean): CompletionStage[Done] =
-    delegate.deleteStates(persistenceIds.asScala.toVector, resetRevisionNumber).asJava
+  def deleteStates(persistenceIds: JList[String], resetRevisionNumber: Boolean): CompletionStage[Done] = {
+    delegate.deleteStates(persistenceIds.asScala.toVector, resetRevisionNumber).toJava
+  }
+
 }

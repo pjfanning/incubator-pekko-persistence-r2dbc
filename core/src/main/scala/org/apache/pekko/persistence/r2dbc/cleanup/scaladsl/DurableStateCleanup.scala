@@ -8,27 +8,25 @@
  */
 
 /*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.cleanup.scaladsl
 
 import scala.collection.immutable
-import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.util.Failure
 import scala.util.Success
 
-import org.apache.pekko
 import pekko.Done
 import pekko.actor.ClassicActorSystemProvider
 import pekko.actor.typed.ActorSystem
+import pekko.actor.typed.scaladsl.LoggerOps
 import pekko.annotation.ApiMayChange
 import pekko.annotation.InternalApi
-import pekko.persistence.r2dbc.CleanupSettings
-import pekko.persistence.r2dbc.StateSettings
+import pekko.persistence.r2dbc.ConnectionFactoryProvider
+import pekko.persistence.r2dbc.R2dbcSettings
 import pekko.persistence.r2dbc.state.scaladsl.DurableStateDao
-import com.typesafe.config.Config
 import org.slf4j.LoggerFactory
 
 /**
@@ -45,8 +43,6 @@ import org.slf4j.LoggerFactory
  * When a list of `persistenceIds` are given they are deleted sequentially in the order of the list. It's possible to
  * parallelize the deletes by running several cleanup operations at the same time operating on different sets of
  * `persistenceIds`.
- *
- * @since 2.0.0
  */
 @ApiMayChange
 final class DurableStateCleanup(systemProvider: ClassicActorSystemProvider, configPath: String) {
@@ -67,30 +63,22 @@ final class DurableStateCleanup(systemProvider: ClassicActorSystemProvider, conf
   private val log = LoggerFactory.getLogger(classOf[DurableStateCleanup])
 
   private val sharedConfigPath = configPath.replaceAll("""\.cleanup$""", "")
-  private val systemConfig: Config = system.settings.config
+  private val settings = R2dbcSettings(system.settings.config.getConfig(sharedConfigPath))
 
-  private val cleanupSettings = new CleanupSettings(systemConfig.getConfig(configPath))
-
-  private val stateConfig = systemConfig.getConfig(sharedConfigPath + ".state")
-  private val stateSettings = StateSettings(stateConfig)
-  private val stateDao = DurableStateDao.fromConfig(stateSettings, stateConfig)
+  private val connectionFactory =
+    ConnectionFactoryProvider(system).connectionFactoryFor(sharedConfigPath + ".connection-factory")
+  private val stateDao = new DurableStateDao(settings, connectionFactory)
 
   /**
    * Delete the state related to one single `persistenceId`.
    */
   def deleteState(persistenceId: String, resetRevisionNumber: Boolean): Future[Done] = {
-    if (resetRevisionNumber) {
-      stateDao
-        .deleteState(persistenceId, revision = 0L)
-        .map(_ => Done)(ExecutionContext.parasitic)
-    } else {
+    if (resetRevisionNumber)
+      stateDao.deleteState(persistenceId, revision = 0L) // hard delete without revision check
+    else {
       stateDao.readState(persistenceId).flatMap {
-        case None =>
-          Future.successful(Done) // already deleted
-        case Some(s) =>
-          stateDao
-            .deleteState(persistenceId, s.revision + 1)
-            .map(_ => Done)(ExecutionContext.parasitic)
+        case None    => Future.successful(Done) // already deleted
+        case Some(s) => stateDao.deleteState(persistenceId, s.revision + 1)
       }
     }
   }
@@ -107,15 +95,15 @@ final class DurableStateCleanup(systemProvider: ClassicActorSystemProvider, conf
       operationName: String,
       pidOperation: String => Future[Done]): Future[Done] = {
     val size = persistenceIds.size
-    log.info("Cleanup started {} of [{}] persistenceId.", operationName, size: java.lang.Integer)
+    log.info("Cleanup started {} of [{}] persistenceId.", operationName, size)
 
     def loop(remaining: List[String], n: Int): Future[Done] = {
       remaining match {
         case Nil         => Future.successful(Done)
         case pid :: tail =>
           pidOperation(pid).flatMap { _ =>
-            if (n % cleanupSettings.logProgressEvery == 0)
-              log.info("Cleanup {} [{}] of [{}].", operationName, n: java.lang.Integer, size: java.lang.Integer)
+            if (n % settings.cleanupSettings.logProgressEvery == 0)
+              log.infoN("Cleanup {} [{}] of [{}].", operationName, n, size)
             loop(tail, n + 1)
           }
       }
@@ -125,11 +113,12 @@ final class DurableStateCleanup(systemProvider: ClassicActorSystemProvider, conf
 
     result.onComplete {
       case Success(_) =>
-        log.info("Cleanup completed {} of [{}] persistenceId.", operationName, size: java.lang.Integer)
+        log.info2("Cleanup completed {} of [{}] persistenceId.", operationName, size)
       case Failure(e) =>
-        log.error(s"Cleanup $operationName failed.", e)
+        log.error(s"Cleanup {$operationName} failed.", e)
     }
 
     result
   }
+
 }

@@ -8,7 +8,7 @@
  */
 
 /*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.session.scaladsl
@@ -18,7 +18,6 @@ import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
-import org.apache.pekko
 import pekko.actor.typed.ActorSystem
 import pekko.annotation.ApiMayChange
 import pekko.persistence.r2dbc.ConnectionFactoryProvider
@@ -35,8 +34,8 @@ object R2dbcSession {
   private val logDbCallsDisabled = -1.millis
 
   /**
-   * Runs the passed function using a R2dbcSession with a new transaction. The connection is closed and the transaction
-   * is committed at the end or rolled back in case of failures.
+   * Runs the passed function in using a R2dbcSession with a new transaction. The connection is closed and the
+   * transaction is committed at the end or rolled back in case of failures.
    */
   def withSession[A](system: ActorSystem[_])(fun: R2dbcSession => Future[A]): Future[A] = {
     withSession(system, "pekko.persistence.r2dbc.connection-factory")(fun)

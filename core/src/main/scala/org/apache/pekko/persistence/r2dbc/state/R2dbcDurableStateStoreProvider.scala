@@ -8,12 +8,11 @@
  */
 
 /*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.state
 
-import org.apache.pekko
 import pekko.actor.ExtendedActorSystem
 import pekko.persistence.state.DurableStateStoreProvider
 import com.typesafe.config.Config

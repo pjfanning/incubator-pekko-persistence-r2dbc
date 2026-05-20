@@ -1,22 +1,13 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc
 
-import org.apache.pekko
 import pekko.Done
 import pekko.actor.typed.scaladsl.ActorContext
 import pekko.actor.typed.scaladsl.Behaviors
+import pekko.actor.typed.scaladsl.LoggerOps
 import pekko.actor.typed.{ ActorRef, Behavior }
 import pekko.persistence.r2dbc.query.scaladsl.R2dbcReadJournal
 import pekko.persistence.typed.PersistenceId
@@ -76,26 +67,26 @@ object TestActors {
         { (state, command) =>
           command match {
             case command: Persist =>
-              context.log.debug(
-                "Persist [{}], pid [{}], seqNr [{}]": String,
-                command.payload.toString,
-                pid.id: Object,
-                EventSourcedBehavior.lastSequenceNumber(context) + 1: java.lang.Long)
+              context.log.debugN(
+                "Persist [{}], pid [{}], seqNr [{}]",
+                command.payload,
+                pid.id,
+                EventSourcedBehavior.lastSequenceNumber(context) + 1)
               Effect.persist(command.payload)
             case command: PersistWithAck =>
-              context.log.debug(
+              context.log.debugN(
                 "Persist [{}], pid [{}], seqNr [{}]",
-                command.payload.toString,
+                command.payload,
                 pid.id,
-                EventSourcedBehavior.lastSequenceNumber(context) + 1: java.lang.Long)
+                EventSourcedBehavior.lastSequenceNumber(context) + 1)
               Effect.persist(command.payload).thenRun(_ => command.replyTo ! Done)
             case command: PersistAll =>
               if (context.log.isDebugEnabled)
-                context.log.debug(
+                context.log.debugN(
                   "PersistAll [{}], pid [{}], seqNr [{}]",
                   command.payloads.mkString(","),
                   pid.id,
-                  EventSourcedBehavior.lastSequenceNumber(context) + 1: java.lang.Long)
+                  EventSourcedBehavior.lastSequenceNumber(context) + 1)
               Effect.persist(command.payloads)
             case Ping(replyTo) =>
               replyTo ! Done
@@ -138,31 +129,31 @@ object TestActors {
           { (state, command) =>
             command match {
               case command: Persist =>
-                context.log.debug(
+                context.log.debugN(
                   "Persist [{}], pid [{}], seqNr [{}]",
-                  command.payload.toString,
-                  pid.id: Object,
-                  (DurableStateBehavior.lastSequenceNumber(context) + 1: java.lang.Long): Object)
+                  command.payload,
+                  pid.id,
+                  DurableStateBehavior.lastSequenceNumber(context) + 1)
                 Effect.persist(command.payload)
               case command: PersistWithAck =>
-                context.log.debug(
+                context.log.debugN(
                   "Persist [{}], pid [{}], seqNr [{}]",
-                  command.payload.toString,
-                  pid.id: Object,
-                  (DurableStateBehavior.lastSequenceNumber(context) + 1: java.lang.Long): Object)
+                  command.payload,
+                  pid.id,
+                  DurableStateBehavior.lastSequenceNumber(context) + 1)
                 Effect.persist(command.payload).thenRun(_ => command.replyTo ! Done)
               case command: DeleteWithAck =>
                 context.log
                   .debug("Delete pid [{}], seqNr [{}]", pid.id, DurableStateBehavior.lastSequenceNumber(context) + 1)
-                Effect.delete[Any]().thenRun(_ => command.replyTo ! Done)
+                Effect.delete[String]().thenRun(_ => command.replyTo ! Done)
+              case Ping(replyTo) =>
+                replyTo ! Done
+                Effect.none
               case GetState(replyTo) =>
                 replyTo ! state
                 Effect.none
               case GetRevision(replyTo) =>
                 replyTo ! DurableStateBehavior.lastSequenceNumber(context)
-                Effect.none
-              case Ping(replyTo) =>
-                replyTo ! Done
                 Effect.none
               case Stop(replyTo) =>
                 replyTo ! Done

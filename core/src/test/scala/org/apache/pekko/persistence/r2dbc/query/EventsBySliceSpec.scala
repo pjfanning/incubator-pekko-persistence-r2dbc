@@ -1,27 +1,16 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.query
 
 import scala.concurrent.Await
 import scala.concurrent.duration._
-
-import org.apache.pekko
 import pekko.Done
 import pekko.NotUsed
 import pekko.actor.testkit.typed.scaladsl.LogCapturing
 import pekko.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
-import pekko.actor.typed.ActorSystem
+import pekko.actor.typed.{ ActorRef, ActorSystem }
 import pekko.persistence.query.NoOffset
 import pekko.persistence.query.Offset
 import pekko.persistence.query.PersistenceQuery
@@ -29,6 +18,7 @@ import pekko.persistence.query.TimestampOffset
 import pekko.persistence.query.typed.EventEnvelope
 import pekko.persistence.query.typed.scaladsl.EventTimestampQuery
 import pekko.persistence.query.typed.scaladsl.LoadEventQuery
+import pekko.persistence.r2dbc.R2dbcSettings
 import pekko.persistence.r2dbc.TestActors
 import pekko.persistence.r2dbc.TestActors.Persister
 import pekko.persistence.r2dbc.TestActors.Persister.Persist
@@ -84,6 +74,7 @@ class EventsBySliceSpec
   import EventsBySliceSpec._
 
   override def typedSystem: ActorSystem[_] = system
+  private val settings = new R2dbcSettings(system.settings.config.getConfig("pekko.persistence.r2dbc"))
 
   private val query = PersistenceQuery(testKit.system).readJournalFor[R2dbcReadJournal](R2dbcReadJournal.Identifier)
 
@@ -93,7 +84,7 @@ class EventsBySliceSpec
     val slice = query.sliceForPersistenceId(persistenceId)
     val persister = spawn(TestActors.Persister(persistenceId))
     val probe = createTestProbe[Done]()
-    val sinkProbe = TestSink[EventEnvelope[String]]()(system.classicSystem)
+    val sinkProbe = TestSink.probe[EventEnvelope[String]](system.classicSystem)
   }
 
   List[QueryType](Current, Live).foreach { queryType =>
@@ -153,7 +144,7 @@ class EventsBySliceSpec
 
         val withOffset =
           doQuery(entityType, slice, slice, offset)
-            .runWith(TestSink[EventEnvelope[String]]()(system.classicSystem))
+            .runWith(TestSink.probe[EventEnvelope[String]](system.classicSystem))
         withOffset.request(12)
         for (i <- 11 to 20) {
           withOffset.expectNext().event shouldBe s"e-$i"
@@ -236,6 +227,25 @@ class EventsBySliceSpec
         intercept[NoSuchElementException] {
           Await.result(query.loadEnvelope[String](persistenceId, 4L), patience.timeout)
         }
+      }
+
+      "includes tags" in new Setup {
+        val taggingPersister: ActorRef[Persister.Command] =
+          spawn(TestActors.Persister(PersistenceId.ofUniqueId(persistenceId), tags = Set("tag-A")))
+        for (i <- 1 to 3) {
+          taggingPersister ! PersistWithAck(s"f-$i", probe.ref)
+          probe.expectMessage(10.seconds, Done)
+        }
+
+        val result: TestSubscriber.Probe[EventEnvelope[String]] =
+          doQuery(entityType, slice, slice, NoOffset)
+            .runWith(TestSink())
+
+        result.request(3)
+        val envelopes = result.expectNextN(3)
+        envelopes.map(_.tags) should ===(Seq(Set("tag-A"), Set("tag-A"), Set("tag-A")))
+
+        query.loadEnvelope[String](persistenceId, 1L).futureValue.tags shouldBe Set("tag-A")
       }
 
     }

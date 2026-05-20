@@ -8,20 +8,18 @@
  */
 
 /*
- * Copyright (C) 2021-2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.state.scaladsl
 
 import scala.collection.immutable
-import scala.concurrent.{ ExecutionContext, Future }
-
-import com.typesafe.config.Config
-import org.apache.pekko
+import scala.concurrent.ExecutionContext
+import scala.concurrent.Future
 import pekko.Done
 import pekko.NotUsed
 import pekko.actor.ExtendedActorSystem
-import pekko.actor.typed.ActorSystem
+import pekko.actor.typed.scaladsl.LoggerOps
 import pekko.actor.typed.scaladsl.adapter._
 import pekko.persistence.Persistence
 import pekko.persistence.query.DeletedDurableState
@@ -31,7 +29,8 @@ import pekko.persistence.query.TimestampOffset
 import pekko.persistence.query.UpdatedDurableState
 import pekko.persistence.query.scaladsl.DurableStateStorePagedPersistenceIdsQuery
 import pekko.persistence.query.typed.scaladsl.DurableStateStoreBySliceQuery
-import pekko.persistence.r2dbc.StateSettings
+import pekko.persistence.r2dbc.ConnectionFactoryProvider
+import pekko.persistence.r2dbc.R2dbcSettings
 import pekko.persistence.r2dbc.internal.BySliceQuery
 import pekko.persistence.r2dbc.internal.ContinuousQuery
 import pekko.persistence.r2dbc.state.scaladsl.DurableStateDao.SerializedStateRow
@@ -40,6 +39,7 @@ import pekko.persistence.state.scaladsl.GetObjectResult
 import pekko.serialization.SerializationExtension
 import pekko.serialization.Serializers
 import pekko.stream.scaladsl.Source
+import com.typesafe.config.Config
 import org.slf4j.LoggerFactory
 
 object R2dbcDurableStateStore {
@@ -59,14 +59,18 @@ class R2dbcDurableStateStore[A](system: ExtendedActorSystem, config: Config, cfg
   import R2dbcDurableStateStore.PersistenceIdsQueryState
 
   private val log = LoggerFactory.getLogger(getClass)
-  private val settings = StateSettings(config)
+  private val sharedConfigPath = cfgPath.replaceAll("""\.state$""", "")
+  private val settings = R2dbcSettings(system.settings.config.getConfig(sharedConfigPath))
 
-  private implicit val typedSystem: ActorSystem[_] = system.toTyped
-  implicit val ec: ExecutionContext = system.dispatcher
+  private val typedSystem = system.toTyped
   private val serialization = SerializationExtension(system)
   private val persistenceExt = Persistence(system)
-
-  private val stateDao = DurableStateDao.fromConfig(settings, config)
+  private val stateDao =
+    new DurableStateDao(
+      settings,
+      ConnectionFactoryProvider(typedSystem).connectionFactoryFor(sharedConfigPath + ".connection-factory"))(
+      typedSystem.executionContext,
+      typedSystem)
 
   private val bySlice: BySliceQuery[SerializedStateRow, DurableStateChange[A]] = {
     val createEnvelope: (TimestampOffset, SerializedStateRow) => DurableStateChange[A] = (offset, row) => {
@@ -131,6 +135,7 @@ class R2dbcDurableStateStore[A](system: ExtendedActorSystem, config: Config, cfg
       if (tag.isEmpty) Set.empty else Set(tag))
 
     stateDao.upsertState(serializedRow, value)
+
   }
 
   @deprecated(message = "Use the deleteObject overload with revision instead.", since = "1.0.0")
@@ -170,6 +175,11 @@ class R2dbcDurableStateStore[A](system: ExtendedActorSystem, config: Config, cfg
       offset: Offset): Source[DurableStateChange[A], NotUsed] =
     bySlice.liveBySlices("changesBySlices", entityType, minSlice, maxSlice, offset)
 
+  /**
+   * Note: If you have configured `custom-table` this query will look in both the default table and the custom tables.
+   * If you are only interested in ids for a specific entity type it's more efficient to use `currentPersistenceIds`
+   * with `entityType` parameter.
+   */
   override def currentPersistenceIds(afterId: Option[String], limit: Long): Source[String, NotUsed] =
     stateDao.persistenceIds(afterId, limit)
 
@@ -194,7 +204,7 @@ class R2dbcDurableStateStore[A](system: ExtendedActorSystem, config: Config, cfg
     stateDao.persistenceIds(entityType, afterId, limit)
 
   def currentPersistenceIds(): Source[String, NotUsed] = {
-    import settings.persistenceIdsBufferSize
+    import settings.querySettings.persistenceIdsBufferSize
     def updateState(state: PersistenceIdsQueryState, pid: String): PersistenceIdsQueryState =
       state.copy(rowCount = state.rowCount + 1, latestPid = pid)
 
@@ -203,17 +213,17 @@ class R2dbcDurableStateStore[A](system: ExtendedActorSystem, config: Config, cfg
         val newState2 = newState.copy(rowCount = 0, queryCount = newState.queryCount + 1)
 
         if (newState.queryCount != 0 && log.isDebugEnabled())
-          log.debug(
+          log.debugN(
             "persistenceIds query [{}] after [{}]. Found [{}] rows in previous query.",
-            newState.queryCount: java.lang.Integer,
+            newState.queryCount,
             newState.latestPid,
-            newState.rowCount: java.lang.Integer)
+            newState.rowCount)
 
         val afterPid = if (newState.latestPid == "") None else Some(newState.latestPid)
 
         newState2 -> Some(
           stateDao
-            .persistenceIdsFromTable(afterPid, persistenceIdsBufferSize, newState.tables.head))
+            .persistenceIds(afterPid, persistenceIdsBufferSize, newState.tables.head))
       }
 
       if (state.queryCount == 0L || state.rowCount >= persistenceIdsBufferSize) {

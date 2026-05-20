@@ -1,28 +1,18 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.internal
 
 import scala.concurrent.duration._
 
-import org.apache.pekko
-import org.apache.pekko.NotUsed
-import org.apache.pekko.actor.ActorSystem
-import org.apache.pekko.actor.testkit.typed.scaladsl.LogCapturing
-import org.apache.pekko.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
-import org.apache.pekko.stream.scaladsl.Sink
-import org.apache.pekko.stream.scaladsl.Source
-import org.apache.pekko.stream.testkit.scaladsl.TestSink
+import pekko.NotUsed
+import pekko.actor.ActorSystem
+import pekko.actor.testkit.typed.scaladsl.LogCapturing
+import pekko.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
+import pekko.stream.scaladsl.Sink
+import pekko.stream.scaladsl.Source
+import pekko.stream.testkit.scaladsl.TestSink
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.wordspec.AnyWordSpecLike
 
@@ -89,7 +79,7 @@ class ContinuousQuerySpec extends ScalaTestWithActorTestKit with AnyWordSpecLike
           updateState = (state, _) => state.copy(value = "cats"),
           delayNextQuery = state => Some(1.second),
           nextQuery = state => state -> results.next())
-          .runWith(TestSink[String]())
+          .runWith(TestSink.probe[String])
 
       sub
         .request(1)
@@ -113,7 +103,7 @@ class ContinuousQuerySpec extends ScalaTestWithActorTestKit with AnyWordSpecLike
           delayNextQuery = state => Some(1.second),
           nextQuery = state => state -> results.next())
           .map(_.apply())
-          .runWith(TestSink())
+          .runWith(TestSink.probe)
 
       sub
         .requestNext("one")
@@ -131,7 +121,7 @@ class ContinuousQuerySpec extends ScalaTestWithActorTestKit with AnyWordSpecLike
           updateState = (state, _) => state.copy(value = "cats"),
           delayNextQuery = state => Some(1.second),
           nextQuery = state => state -> results.next())
-          .runWith(TestSink[String]())
+          .runWith(TestSink.probe[String])
 
       // give time for the startup to do the pull the buffer the element
       Thread.sleep(500)

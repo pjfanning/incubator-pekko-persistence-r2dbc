@@ -1,13 +1,4 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * license agreements; and to You under the Apache License, version 2.0:
- *
- *   https://www.apache.org/licenses/LICENSE-2.0
- *
- * This file is part of the Apache Pekko project, which was derived from Akka.
- */
-
-/*
  * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
@@ -15,7 +6,6 @@ package org.apache.pekko.persistence.r2dbc
 
 import java.nio.charset.StandardCharsets.UTF_8
 
-import org.apache.pekko
 import pekko.Done
 import pekko.actor.testkit.typed.scaladsl.LogCapturing
 import pekko.actor.testkit.typed.scaladsl.ScalaTestWithActorTestKit
@@ -35,7 +25,7 @@ import org.scalatest.wordspec.AnyWordSpecLike
  * sbt -Dpekko.persistence.r2dbc.journal.payload-column-type=JSONB -Dpekko.persistence.r2dbc.snapshot.payload-column-type=JSONB -Dpekko.persistence.r2dbc.state.payload-column-type=JSONB
  * }}}
  *
- * Note that other tests may fail with JSONB column type because the test data isn't in json.
+ * Note that other test may fail with JSONB column type because the test data isn't in json.
  */
 object PayloadSpec {
   val config = ConfigFactory
@@ -70,6 +60,7 @@ class PayloadSpec
   import PayloadSpec._
 
   override def typedSystem: ActorSystem[_] = system
+  private val settings = new R2dbcSettings(system.settings.config.getConfig("pekko.persistence.r2dbc"))
 
   private def testJournalPersister(persistenceId: String, msg: Any): Unit = {
     val probe = createTestProbe[Any]()
@@ -98,13 +89,13 @@ class PayloadSpec
   }
 
   private def selectJournalRow(persistenceId: String): TestRow = {
-    implicit val codec: PayloadCodec = journalSettings.journalPayloadCodec
+    implicit val journalPayloadCodec: PayloadCodec = settings.journalPayloadCodec
 
     r2dbcExecutor
       .selectOne[TestRow]("test")(
         connection =>
           connection.createStatement(
-            s"select * from ${journalSettings.journalTableWithSchema} where persistence_id = '$persistenceId'"),
+            s"select * from ${settings.journalTableWithSchema} where persistence_id = '$persistenceId'"),
         row => {
           val payload = row.getPayload("event_payload")
           TestRow(
@@ -117,13 +108,13 @@ class PayloadSpec
   }
 
   private def selectSnapshotRow(persistenceId: String): TestRow = {
-    implicit val codec: PayloadCodec = snapshotSettings.snapshotPayloadCodec
+    implicit val snapshotPayloadCodec: PayloadCodec = settings.snapshotPayloadCodec
 
     r2dbcExecutor
       .selectOne[TestRow]("test")(
         connection =>
           connection.createStatement(
-            s"select * from ${snapshotSettings.snapshotsTableWithSchema} where persistence_id = '$persistenceId'"),
+            s"select * from ${settings.snapshotsTableWithSchema} where persistence_id = '$persistenceId'"),
         row => {
           val payload = row.getPayload("snapshot")
           TestRow(
@@ -136,13 +127,13 @@ class PayloadSpec
   }
 
   private def selectDurableStateRow(persistenceId: String): TestRow = {
-    implicit val codec: PayloadCodec = stateSettings.durableStatePayloadCodec
+    implicit val durableStatePayloadCodec: PayloadCodec = settings.durableStatePayloadCodec
 
     r2dbcExecutor
       .selectOne[TestRow]("test")(
         connection =>
           connection.createStatement(
-            s"select * from ${stateSettings.durableStateTableWithSchema} where persistence_id = '$persistenceId'"),
+            s"select * from ${settings.durableStateTableWithSchema} where persistence_id = '$persistenceId'"),
         row => {
           val payload = row.getPayload("state_payload")
           TestRow(
@@ -170,7 +161,7 @@ class PayloadSpec
       testJournalPersister(persistenceId, msg)
 
       val row = selectJournalRow(persistenceId)
-      new String(row.payload, UTF_8).clearWhitespace shouldBe """{"a":"b","i":17}""".clearWhitespace
+      new String(row.payload, UTF_8).clearWhitespace shouldBe """{"a": "b", "i": 17}""".clearWhitespace
     }
   }
 
@@ -201,52 +192,43 @@ class PayloadSpec
       testDurableStatePersister(persistenceId, msg)
 
       val row = selectDurableStateRow(persistenceId)
-      new String(row.payload, UTF_8).clearWhitespace shouldBe """{"a":"b","i":17}""".clearWhitespace
+      new String(row.payload, UTF_8).clearWhitespace shouldBe """{"a": "b", "i": 17}""".clearWhitespace
     }
 
     "store delete marker" in {
       val persistenceId = nextPid(nextEntityType())
       val probe = createTestProbe[Any]()
-
-      val msg = """{"a": "to be deleted"}"""
-
-      // persist first so we have a known row at revision 1
       val ref1 = spawn(DurableStatePersister(persistenceId))
-      ref1 ! DurableStatePersister.PersistWithAck(msg, probe.ref)
-      probe.expectMessage(Done)
-
-      val row1 = selectDurableStateRow(persistenceId)
-      new String(row1.payload, UTF_8).clearWhitespace shouldBe msg.clearWhitespace
-
-      // delete after change: updates the row to a delete marker (revision 2)
+      // delete before any change should insert delete marker
       ref1 ! DurableStatePersister.DeleteWithAck(probe.ref)
       probe.expectMessage(Done)
       testKit.stop(ref1)
 
-      val row2 = selectDurableStateRow(persistenceId)
-      row2.payload.toVector shouldBe stateSettings.durableStatePayloadCodec.nonePayload.toVector
+      val row1 = selectDurableStateRow(persistenceId)
+      row1.payload.toVector shouldBe settings.durableStatePayloadCodec.nonePayload.toVector
 
       val ref2 = spawn(DurableStatePersister(persistenceId))
       ref2 ! DurableStatePersister.GetState(probe.ref)
       probe.expectMessage("") // after delete
+      val msg = """{"a": "to be deleted"}""" // not important what we store
+      ref2 ! DurableStatePersister.PersistWithAck(msg, probe.ref)
+      probe.expectMessage(Done)
 
-      // persist new state after the delete
-      val msg2 = """{"b": "new state"}"""
-      ref2 ! DurableStatePersister.PersistWithAck(msg2, probe.ref)
+      val row2 = selectDurableStateRow(persistenceId)
+      new String(row2.payload, UTF_8).clearWhitespace shouldBe msg.clearWhitespace
+
+      // delete after some change
+      ref2 ! DurableStatePersister.DeleteWithAck(probe.ref)
       probe.expectMessage(Done)
       testKit.stop(ref2)
 
-      val row3 = selectDurableStateRow(persistenceId)
-      new String(row3.payload, UTF_8).clearWhitespace shouldBe msg2.clearWhitespace
-
-      // delete again
       val ref3 = spawn(DurableStatePersister(persistenceId))
-      ref3 ! DurableStatePersister.DeleteWithAck(probe.ref)
-      probe.expectMessage(Done)
+      ref3 ! DurableStatePersister.GetState(probe.ref)
+      probe.expectMessage("") // after delete
       testKit.stop(ref3)
 
-      val row4 = selectDurableStateRow(persistenceId)
-      row4.payload.toVector shouldBe stateSettings.durableStatePayloadCodec.nonePayload.toVector
+      val row3 = selectDurableStateRow(persistenceId)
+      row3.payload.toVector shouldBe settings.durableStatePayloadCodec.nonePayload.toVector
     }
   }
 }

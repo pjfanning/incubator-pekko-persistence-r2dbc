@@ -8,7 +8,7 @@
  */
 
 /*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.state.javadsl
@@ -16,11 +16,7 @@ package org.apache.pekko.persistence.r2dbc.state.javadsl
 import java.util
 import java.util.Optional
 import java.util.concurrent.CompletionStage
-
 import scala.concurrent.ExecutionContext
-import scala.jdk.FutureConverters._
-
-import org.apache.pekko
 import pekko.Done
 import pekko.NotUsed
 import pekko.japi.Pair
@@ -32,6 +28,8 @@ import pekko.persistence.r2dbc.state.scaladsl.{ R2dbcDurableStateStore => ScalaR
 import pekko.persistence.state.javadsl.DurableStateUpdateStore
 import pekko.persistence.state.javadsl.GetObjectResult
 import pekko.stream.javadsl.Source
+
+import scala.compat.java8.FutureConverters.FutureOps
 
 object R2dbcDurableStateStore {
   val Identifier: String = ScalaR2dbcDurableStateStore.Identifier
@@ -46,16 +44,17 @@ class R2dbcDurableStateStore[A](scalaStore: ScalaR2dbcDurableStateStore[A])(impl
     scalaStore
       .getObject(persistenceId)
       .map(x => GetObjectResult(Optional.ofNullable(x.value.getOrElse(null.asInstanceOf[A])), x.revision))
-      .asJava
+      .toJava
 
   override def upsertObject(persistenceId: String, revision: Long, value: A, tag: String): CompletionStage[Done] =
-    scalaStore.upsertObject(persistenceId, revision, value, tag).asJava
+    scalaStore.upsertObject(persistenceId, revision, value, tag).toJava
 
+  @deprecated(message = "Use the deleteObject overload with revision instead.", since = "1.0.0")
   override def deleteObject(persistenceId: String): CompletionStage[Done] =
-    scalaStore.deleteObject(persistenceId).asJava
+    deleteObject(persistenceId, revision = 0)
 
   override def deleteObject(persistenceId: String, revision: Long): CompletionStage[Done] =
-    scalaStore.deleteObject(persistenceId, revision).asJava
+    scalaStore.deleteObject(persistenceId, revision).toJava
 
   override def currentChangesBySlices(
       entityType: String,
@@ -75,16 +74,11 @@ class R2dbcDurableStateStore[A](scalaStore: ScalaR2dbcDurableStateStore[A])(impl
     scalaStore.sliceForPersistenceId(persistenceId)
 
   override def sliceRanges(numberOfRanges: Int): util.List[Pair[Integer, Integer]] = {
-    import scala.jdk.CollectionConverters._
+    import pekko.util.ccompat.JavaConverters._
     scalaStore
       .sliceRanges(numberOfRanges)
       .map(range => Pair(Integer.valueOf(range.min), Integer.valueOf(range.max)))
       .asJava
-  }
-
-  override def currentPersistenceIds(afterId: Optional[String], limit: Long): Source[String, NotUsed] = {
-    import scala.jdk.OptionConverters._
-    scalaStore.currentPersistenceIds(afterId.toScala, limit).asJava
   }
 
   /**
@@ -105,10 +99,16 @@ class R2dbcDurableStateStore[A](scalaStore: ScalaR2dbcDurableStateStore[A])(impl
    *   A source containing all the persistence ids, limited as specified.
    */
   def currentPersistenceIds(entityType: String, afterId: Optional[String], limit: Long): Source[String, NotUsed] = {
-    import scala.jdk.OptionConverters._
-    scalaStore.currentPersistenceIds(entityType, afterId.toScala, limit).asJava
+    import scala.compat.java8.OptionConverters._
+    scalaStore.currentPersistenceIds(entityType, afterId.asScala, limit).asJava
+  }
+
+  override def currentPersistenceIds(afterId: Optional[String], limit: Long): Source[String, NotUsed] = {
+    import scala.compat.java8.OptionConverters._
+    scalaStore.currentPersistenceIds(afterId.asScala, limit).asJava
   }
 
   def currentPersistenceIds(): Source[String, NotUsed] =
     scalaStore.currentPersistenceIds().asJava
+
 }

@@ -8,24 +8,24 @@
  */
 
 /*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.internal
 
 import java.util.function.BiConsumer
-
 import scala.collection.immutable
 import scala.collection.mutable
+import scala.compat.java8.FutureConverters._
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.duration.FiniteDuration
 import scala.util.control.NonFatal
-
-import org.apache.pekko
 import pekko.Done
 import pekko.actor.typed.ActorSystem
+import pekko.actor.typed.scaladsl.LoggerOps
 import pekko.annotation.InternalStableApi
+import pekko.dispatch.ExecutionContexts
 import io.r2dbc.spi.Connection
 import io.r2dbc.spi.ConnectionFactory
 import io.r2dbc.spi.Result
@@ -42,26 +42,21 @@ import reactor.core.publisher.Mono
 @InternalStableApi object R2dbcExecutor {
   final implicit class PublisherOps[T](val publisher: Publisher[T]) extends AnyVal {
     def asFuture(): Future[T] =
-      Mono.from(publisher)
-        .subscribeWith(new MonoToFuture[T])
-        .future
+      Mono.from(publisher).toFuture.toScala
 
     def asFutureDone(): Future[Done] = {
-      Mono.from(publisher)
-        .map[Done](_ => Done)
-        .defaultIfEmpty(Done)
-        .subscribeWith(new MonoToFuture[Done])
-        .future
+      val mono: Mono[Done] = Mono.from(publisher).map(_ => Done)
+      mono.defaultIfEmpty(Done).toFuture.toScala
     }
   }
 
   def updateOneInTx(stmt: Statement)(implicit ec: ExecutionContext): Future[Long] =
     stmt.execute().asFuture().flatMap { result =>
-      result.getRowsUpdated.asFuture().map(_.longValue())(ExecutionContext.parasitic)
+      result.getRowsUpdated.asFuture().map(_.longValue())(ExecutionContexts.parasitic)
     }
 
   def updateBatchInTx(stmt: Statement)(implicit ec: ExecutionContext): Future[Long] = {
-    val consumer: BiConsumer[Long, java.lang.Long] = (acc, elem) => acc + elem
+    val consumer: BiConsumer[Long, java.lang.Long] = (acc, elem) => acc + elem.longValue()
     Flux
       .from[Result](stmt.execute())
       .concatMap(_.getRowsUpdated)
@@ -72,10 +67,10 @@ import reactor.core.publisher.Mono
   def updateInTx(statements: immutable.IndexedSeq[Statement])(implicit
       ec: ExecutionContext): Future[immutable.IndexedSeq[Long]] =
     // connection not intended for concurrent calls, make sure statements are executed one at a time
-    statements.foldLeft(Future.successful(immutable.IndexedSeq.empty[Long])) { (acc, stmt) =>
+    statements.foldLeft(Future.successful(Vector.empty[Long])) { (acc, stmt) =>
       acc.flatMap { seq =>
         stmt.execute().asFuture().flatMap { res =>
-          res.getRowsUpdated.asFuture().map(seq :+ _.longValue())(ExecutionContext.parasitic)
+          res.getRowsUpdated.asFuture().map(seq :+ _.longValue())(ExecutionContexts.parasitic)
         }
       }
     }
@@ -92,13 +87,11 @@ import reactor.core.publisher.Mono
       ec: ExecutionContext,
       system: ActorSystem[_]): Future[immutable.IndexedSeq[A]] = {
     statement.execute().asFuture().flatMap { result =>
-      val consumer: BiConsumer[mutable.Builder[A, immutable.IndexedSeq[A]], A] = (builder, elem) => builder += elem
+      val consumer: BiConsumer[mutable.Builder[A, IndexedSeq[A]], A] = (builder, elem) => builder += elem
       Flux
         .from[A](result.map((row, _) => mapRow(row)))
-        .collect(() => immutable.IndexedSeq.newBuilder[A], consumer)
-        // Explicit type annotation required for map due to Scala 2.12,
-        // see https://github.com/scala/bug/issues/9756#issuecomment-292440564
-        .map[immutable.IndexedSeq[A]](_.result())
+        .collect[scala.collection.mutable.Builder[A, IndexedSeq[A]]](() => immutable.IndexedSeq.newBuilder[A], consumer)
+        .map[immutable.IndexedSeq[A]](builder => builder.result().toIndexedSeq)
         .asFuture()
     }
   }
@@ -112,6 +105,7 @@ class R2dbcExecutor(val connectionFactory: ConnectionFactory, log: Logger, logDb
     implicit
     ec: ExecutionContext,
     system: ActorSystem[_]) {
+
   import R2dbcExecutor._
 
   private val logDbCallsExceedingMicros = logDbCallsExceeding.toMicros
@@ -120,7 +114,8 @@ class R2dbcExecutor(val connectionFactory: ConnectionFactory, log: Logger, logDb
   private def nanoTime(): Long =
     if (logDbCallsExceedingEnabled) System.nanoTime() else 0L
 
-  private def durationInMicros(startTime: Long): Long = (nanoTime() - startTime) / 1000
+  private def durationInMicros(startTime: Long): Long =
+    if (logDbCallsExceedingEnabled) (nanoTime() - startTime) / 1000 else Long.MinValue
 
   private def getConnection(logPrefix: String): Future[Connection] = {
     val startTime = nanoTime()
@@ -132,7 +127,7 @@ class R2dbcExecutor(val connectionFactory: ConnectionFactory, log: Logger, logDb
         if (durationMicros >= logDbCallsExceedingMicros)
           log.info("{} - getConnection took [{}] µs", logPrefix, durationMicros)
         connection
-      }(ExecutionContext.parasitic)
+      }(ExecutionContexts.parasitic)
   }
 
   /**
@@ -215,7 +210,7 @@ class R2dbcExecutor(val connectionFactory: ConnectionFactory, log: Logger, logDb
   def updateInBatchReturning[A](logPrefix: String)(
       statementFactory: Connection => Statement,
       mapRow: Row => A): Future[immutable.IndexedSeq[A]] = {
-    import scala.jdk.CollectionConverters._
+    import scala.collection.JavaConverters._
     withConnection(logPrefix) { connection =>
       val stmt = statementFactory(connection)
       Flux
@@ -246,7 +241,7 @@ class R2dbcExecutor(val connectionFactory: ConnectionFactory, log: Logger, logDb
         }
 
       mappedRows.failed.foreach { exc =>
-        log.debug("{} - Select failed: {}", logPrefix: Any, exc: Any)
+        log.debug2("{} - Select failed: {}", logPrefix, exc)
         connection.close().asFutureDone()
       }
 
@@ -254,8 +249,7 @@ class R2dbcExecutor(val connectionFactory: ConnectionFactory, log: Logger, logDb
         connection.close().asFutureDone().map { _ =>
           val durationMicros = durationInMicros(startTime)
           if (durationMicros >= logDbCallsExceedingMicros)
-            log.info("{} - Selected [{}] rows in [{}] µs", logPrefix, r.size: java.lang.Integer,
-              durationMicros: java.lang.Long)
+            log.infoN("{} - Selected [{}] rows in [{}] µs", logPrefix, r.size, durationMicros)
           r
         }
       }
@@ -264,8 +258,8 @@ class R2dbcExecutor(val connectionFactory: ConnectionFactory, log: Logger, logDb
   }
 
   /**
-   * Runs the passed function in using a Connection that's participating on a transaction Transaction is commit at the
-   * end or rolled back in case of failures.
+   * Runs the passed function in using a Connection with a new transaction. The connection is closed and the transaction
+   * is committed at the end or rolled back in case of failures.
    */
   def withConnection[A](logPrefix: String)(fun: Connection => Future[A]): Future[A] = {
     getConnection(logPrefix).flatMap { connection =>
@@ -282,7 +276,7 @@ class R2dbcExecutor(val connectionFactory: ConnectionFactory, log: Logger, logDb
 
         result.failed.foreach { exc =>
           if (log.isDebugEnabled())
-            log.debug("{} - DB call failed: {}", logPrefix: Any, exc.toString: Any)
+            log.debug2("{} - DB call failed: {}", logPrefix, exc.toString)
           // ok to rollback async like this, or should it be before completing the returned Future?
           rollbackAndClose(connection)
         }
@@ -317,7 +311,7 @@ class R2dbcExecutor(val connectionFactory: ConnectionFactory, log: Logger, logDb
           }
 
         result.failed.foreach { exc =>
-          log.debug("{} - DB call failed: {}", logPrefix: Any, exc: Any)
+          log.debug2("{} - DB call failed: {}", logPrefix, exc)
           // auto-commit so nothing to rollback
           connection.close().asFutureDone()
         }
@@ -326,8 +320,7 @@ class R2dbcExecutor(val connectionFactory: ConnectionFactory, log: Logger, logDb
           connection.close().asFutureDone().map { _ =>
             val durationMicros = durationInMicros(startTime)
             if (durationMicros >= logDbCallsExceedingMicros)
-              log.info("{} - DB call completed [{}] in [{}] µs", logPrefix, Option(r).map(_.toString).orNull,
-                durationMicros: java.lang.Long)
+              log.infoN("{} - DB call completed [{}] in [{}] µs", logPrefix, r, durationMicros)
             r
           }
         }

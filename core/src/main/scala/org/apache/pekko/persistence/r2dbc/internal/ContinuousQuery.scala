@@ -8,18 +8,20 @@
  */
 
 /*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.internal
 
-import scala.concurrent.{ ExecutionContext, Future }
+import scala.concurrent.Future
 import scala.concurrent.duration._
-import scala.util.{ Failure, Success, Try }
+import scala.util.Failure
+import scala.util.Success
+import scala.util.Try
 
-import org.apache.pekko
 import pekko.NotUsed
 import pekko.annotation.InternalApi
+import pekko.dispatch.ExecutionContexts
 import pekko.stream.Attributes
 import pekko.stream.Outlet
 import pekko.stream.SourceShape
@@ -124,7 +126,7 @@ final private[r2dbc] class ContinuousQuery[S, T](
             beforeQuery(state) match {
               case None                    => runNextQuery()
               case Some(beforeQueryFuture) =>
-                beforeQueryFuture.onComplete(beforeQueryCallback.invoke)(ExecutionContext.parasitic)
+                beforeQueryFuture.onComplete(beforeQueryCallback.invoke)(ExecutionContexts.parasitic)
             }
         }
       }

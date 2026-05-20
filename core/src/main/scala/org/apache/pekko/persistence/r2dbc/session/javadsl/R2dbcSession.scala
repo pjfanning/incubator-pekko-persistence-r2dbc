@@ -8,7 +8,7 @@
  */
 
 /*
- * Copyright (C) 2022 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.session.javadsl
@@ -17,16 +17,16 @@ import java.util.Optional
 import java.util.concurrent.CompletionStage
 import java.util.function.{ Function => JFunction }
 
-import scala.jdk.CollectionConverters._
-import scala.jdk.FutureConverters._
-import scala.jdk.OptionConverters._
+import scala.collection.JavaConverters._
+import scala.compat.java8.FutureConverters._
+import scala.compat.java8.OptionConverters._
 import scala.concurrent.ExecutionContext
 
-import org.apache.pekko
 import pekko.actor.typed.ActorSystem
 import pekko.annotation.ApiMayChange
+import pekko.dispatch.ExecutionContexts
 import pekko.persistence.r2dbc.internal.R2dbcExecutor
-import pekko.persistence.r2dbc.session.{ scaladsl => scaladslSession }
+import pekko.persistence.r2dbc.session.scaladsl
 import io.r2dbc.spi.Connection
 import io.r2dbc.spi.Row
 import io.r2dbc.spi.Statement
@@ -35,8 +35,8 @@ import io.r2dbc.spi.Statement
 object R2dbcSession {
 
   /**
-   * Runs the passed function using a R2dbcSession with a new transaction. The connection is closed and the transaction
-   * is committed at the end or rolled back in case of failures.
+   * Runs the passed function in using a R2dbcSession with a new transaction. The connection is closed and the
+   * transaction is committed at the end or rolled back in case of failures.
    */
   def withSession[A](system: ActorSystem[_], fun: JFunction[R2dbcSession, CompletionStage[A]]): CompletionStage[A] = {
     withSession(system, "pekko.persistence.r2dbc.connection-factory", fun)
@@ -46,11 +46,11 @@ object R2dbcSession {
       system: ActorSystem[_],
       connectionFactoryConfigPath: String,
       fun: JFunction[R2dbcSession, CompletionStage[A]]): CompletionStage[A] = {
-    scaladslSession.R2dbcSession.withSession(system, connectionFactoryConfigPath) { scaladslSession =>
+    scaladsl.R2dbcSession.withSession(system, connectionFactoryConfigPath) { scaladslSession =>
       val javadslSession = new R2dbcSession(scaladslSession.connection)(system.executionContext, system)
-      fun(javadslSession).asScala
+      fun(javadslSession).toScala
     }
-  }.asJava
+  }.toJava
 
 }
 
@@ -61,18 +61,18 @@ final class R2dbcSession(val connection: Connection)(implicit ec: ExecutionConte
     connection.createStatement(sql)
 
   def updateOne(statement: Statement): CompletionStage[java.lang.Long] =
-    R2dbcExecutor.updateOneInTx(statement).map(java.lang.Long.valueOf)(ExecutionContext.parasitic).asJava
+    R2dbcExecutor.updateOneInTx(statement).map(java.lang.Long.valueOf)(ExecutionContexts.parasitic).toJava
 
   def update(statements: java.util.List[Statement]): CompletionStage[java.util.List[java.lang.Long]] =
     R2dbcExecutor
       .updateInTx(statements.asScala.toVector)
       .map(results => results.map(java.lang.Long.valueOf).asJava)
-      .asJava
+      .toJava
 
   def selectOne[A](statement: Statement)(mapRow: Row => A): CompletionStage[Optional[A]] =
-    R2dbcExecutor.selectOneInTx(statement, mapRow).map(_.toJava)(ExecutionContext.parasitic).asJava
+    R2dbcExecutor.selectOneInTx(statement, mapRow).map(_.asJava)(ExecutionContexts.parasitic).toJava
 
   def select[A](statement: Statement)(mapRow: Row => A): CompletionStage[java.util.List[A]] =
-    R2dbcExecutor.selectInTx(statement, mapRow).map(_.asJava).asJava
+    R2dbcExecutor.selectInTx(statement, mapRow).map(_.asJava).toJava
 
 }

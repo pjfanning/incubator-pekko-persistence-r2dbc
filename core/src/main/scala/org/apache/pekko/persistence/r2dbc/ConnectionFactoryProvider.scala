@@ -8,7 +8,7 @@
  */
 
 /*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc
@@ -18,21 +18,14 @@ import java.util.concurrent.ConcurrentHashMap
 
 import scala.concurrent.Future
 import scala.concurrent.duration.Duration
-import scala.jdk.CollectionConverters._
-import scala.util.Failure
-import scala.util.Success
+import scala.collection.JavaConverters._
 
-import org.apache.pekko
 import pekko.Done
 import pekko.actor.CoordinatedShutdown
 import pekko.actor.typed.ActorSystem
 import pekko.actor.typed.Extension
 import pekko.actor.typed.ExtensionId
-import pekko.persistence.r2dbc.ConnectionFactoryProvider.ConnectionFactoryOptionsCustomizer
-import pekko.persistence.r2dbc.ConnectionFactoryProvider.NoopCustomizer
-import pekko.persistence.r2dbc.internal.R2dbcExecutor.PublisherOps
-import com.typesafe.config.Config
-import com.typesafe.config.ConfigFactory
+import pekko.persistence.r2dbc.internal.R2dbcExecutor
 import io.r2dbc.pool.ConnectionPool
 import io.r2dbc.pool.ConnectionPoolConfiguration
 import io.r2dbc.postgresql.PostgresqlConnectionFactoryProvider
@@ -40,44 +33,17 @@ import io.r2dbc.postgresql.client.SSLMode
 import io.r2dbc.spi.ConnectionFactories
 import io.r2dbc.spi.ConnectionFactory
 import io.r2dbc.spi.ConnectionFactoryOptions
-import io.r2dbc.spi.Option
 
 object ConnectionFactoryProvider extends ExtensionId[ConnectionFactoryProvider] {
   def createExtension(system: ActorSystem[_]): ConnectionFactoryProvider = new ConnectionFactoryProvider(system)
 
   // Java API
   def get(system: ActorSystem[_]): ConnectionFactoryProvider = apply(system)
-
-  /**
-   * Enables customization of [[ConnectionFactoryOptions]] right before the connection factory is created.
-   * This is particularly useful for setting options that support dynamically computed values rather than
-   * just plain constants. Classes implementing this trait must have a constructor with a single parameter
-   * of type [[ActorSystem]].
-   *
-   * @since 1.1.0
-   */
-  trait ConnectionFactoryOptionsCustomizer {
-
-    /**
-     * Customizes the [[ConnectionFactoryOptions.Builder]] instance based on the provided configuration.
-     *
-     * @param builder the options builder that has been pre-configured by the connection factory provider
-     * @param config  the connection factory configuration
-     * @return        the modified options builder with the applied customizations
-     *
-     * @since 1.1.0
-     */
-    def apply(builder: ConnectionFactoryOptions.Builder, config: Config): ConnectionFactoryOptions.Builder
-  }
-
-  private object NoopCustomizer extends ConnectionFactoryOptionsCustomizer {
-    override def apply(builder: ConnectionFactoryOptions.Builder, config: Config): ConnectionFactoryOptions.Builder =
-      builder
-  }
 }
 
 class ConnectionFactoryProvider(system: ActorSystem[_]) extends Extension {
 
+  import R2dbcExecutor.PublisherOps
   private val sessions = new ConcurrentHashMap[String, ConnectionPool]
 
   CoordinatedShutdown(system)
@@ -88,42 +54,20 @@ class ConnectionFactoryProvider(system: ActorSystem[_]) extends Extension {
         .map(_ => Done)
     }
 
-  def connectionFactoryFor(configPath: String): ConnectionFactory = {
-    connectionFactoryFor(configPath, ConfigFactory.empty())
-  }
-
-  def connectionFactoryFor(configPath: String, config: Config): ConnectionFactory = {
+  def connectionFactoryFor(configLocation: String): ConnectionFactory = {
     sessions
       .computeIfAbsent(
-        configPath,
-        _ => {
-          val fullConfig = config.withFallback(system.settings.config)
-          val settings =
-            new ConnectionFactorySettings(fullConfig.getConfig(configPath))
-          val customizer = createConnectionFactoryOptionsCustomizer(settings)
-          createConnectionPoolFactory(settings, customizer, fullConfig)
+        configLocation,
+        configLocation => {
+          val config = system.settings.config.getConfig(configLocation)
+          val settings = new ConnectionFactorySettings(config)
+          createConnectionPoolFactory(settings)
         })
       .asInstanceOf[ConnectionFactory]
   }
 
-  private def createConnectionFactoryOptionsCustomizer(
-      settings: ConnectionFactorySettings): ConnectionFactoryOptionsCustomizer = {
-    settings.connectionFactoryOptionsCustomizer match {
-      case None       => NoopCustomizer
-      case Some(fqcn) =>
-        val args = List(classOf[ActorSystem[_]] -> system)
-        system.dynamicAccess.createInstanceFor[ConnectionFactoryOptionsCustomizer](fqcn, args) match {
-          case Success(customizer) => customizer
-          case Failure(cause)      =>
-            throw new IllegalArgumentException(s"Failed to create ConnectionFactoryOptionsCustomizer for class $fqcn",
-              cause)
-        }
-    }
-  }
+  private def createConnectionFactory(settings: ConnectionFactorySettings): ConnectionFactory = {
 
-  private def createConnectionFactory(settings: ConnectionFactorySettings,
-      customizer: ConnectionFactoryOptionsCustomizer,
-      config: Config): ConnectionFactory = {
     val builder =
       settings.urlOption match {
         case Some(url) =>
@@ -166,23 +110,14 @@ class ConnectionFactoryProvider(system: ActorSystem[_]) extends Extension {
         builder.option(PostgresqlConnectionFactoryProvider.SSL_PASSWORD, settings.sslPassword)
     }
 
-    if (settings.driver == "mysql") {
-      // Either `connectionTimeZone = SERVER` or `forceConnectionTimeZoneToSession = true` need to be set for timezones to work correctly,
-      // likely caused by bug in https://github.com/asyncer-io/r2dbc-mysql/pull/240.
-      builder.option(Option.valueOf("connectionTimeZone"), "SERVER")
-    }
-
-    ConnectionFactories.get(customizer(builder, config).build())
+    ConnectionFactories.get(builder.build())
   }
 
-  private def createConnectionPoolFactory(settings: ConnectionFactorySettings,
-      customizer: ConnectionFactoryOptionsCustomizer,
-      config: Config): ConnectionPool = {
-    val connectionFactory = createConnectionFactory(settings, customizer, config)
+  private def createConnectionPoolFactory(settings: ConnectionFactorySettings): ConnectionPool = {
+    val connectionFactory = createConnectionFactory(settings)
 
     val evictionInterval = {
-      import settings.maxIdleTime
-      import settings.maxLifeTime
+      import settings.{ maxIdleTime, maxLifeTime }
       if (maxIdleTime <= Duration.Zero && maxLifeTime <= Duration.Zero) {
         JDuration.ZERO
       } else if (maxIdleTime <= Duration.Zero) {

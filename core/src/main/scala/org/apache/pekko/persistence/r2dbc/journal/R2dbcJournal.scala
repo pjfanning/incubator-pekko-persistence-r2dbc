@@ -8,7 +8,7 @@
  */
 
 /*
- * Copyright (C) 2021 Lightbend Inc. <https://www.lightbend.com>
+ * Copyright (C) 2022 - 2023 Lightbend Inc. <https://www.lightbend.com>
  */
 
 package org.apache.pekko.persistence.r2dbc.journal
@@ -16,32 +16,38 @@ package org.apache.pekko.persistence.r2dbc.journal
 import java.time.Instant
 
 import scala.collection.immutable
-import scala.concurrent.{ ExecutionContext, Future }
-import scala.util.{ Failure, Success, Try }
+import scala.concurrent.ExecutionContext
+import scala.concurrent.Future
+import scala.util.Failure
+import scala.util.Success
+import scala.util.Try
 
-import com.typesafe.config.Config
-import org.apache.pekko
 import pekko.Done
 import pekko.actor.ActorRef
 import pekko.actor.typed.ActorSystem
 import pekko.actor.typed.scaladsl.adapter._
 import pekko.annotation.InternalApi
+import pekko.dispatch.ExecutionContexts
 import pekko.event.Logging
 import pekko.persistence.AtomicWrite
 import pekko.persistence.Persistence
 import pekko.persistence.PersistentRepr
 import pekko.persistence.journal.AsyncWriteJournal
 import pekko.persistence.journal.Tagged
-import pekko.persistence.r2dbc.JournalSettings
+import pekko.persistence.query.PersistenceQuery
+import pekko.persistence.r2dbc.ConnectionFactoryProvider
+import pekko.persistence.r2dbc.R2dbcSettings
 import pekko.persistence.r2dbc.internal.InstantFactory
 import pekko.persistence.r2dbc.internal.PubSub
 import pekko.persistence.r2dbc.journal.JournalDao.SerializedEventMetadata
 import pekko.persistence.r2dbc.journal.JournalDao.SerializedJournalRow
+import pekko.persistence.r2dbc.query.scaladsl.R2dbcReadJournal
 import pekko.persistence.typed.PersistenceId
 import pekko.serialization.Serialization
 import pekko.serialization.SerializationExtension
 import pekko.serialization.Serializers
 import pekko.stream.scaladsl.Sink
+import com.typesafe.config.Config
 
 /**
  * INTERNAL API
@@ -87,10 +93,15 @@ private[r2dbc] final class R2dbcJournal(config: Config, cfgPath: String) extends
 
   private val persistenceExt = Persistence(system)
 
+  private val sharedConfigPath = cfgPath.replaceAll("""\.journal$""", "")
   private val serialization: Serialization = SerializationExtension(context.system)
-  private val journalSettings = JournalSettings(config)
+  private val journalSettings = R2dbcSettings(context.system.settings.config.getConfig(sharedConfigPath))
 
-  private val journalDao = JournalDao.fromConfig(journalSettings, config)
+  private val journalDao =
+    new JournalDao(
+      journalSettings,
+      ConnectionFactoryProvider(system).connectionFactoryFor(sharedConfigPath + ".connection-factory"))
+  private val query = PersistenceQuery(system).readJournalFor[R2dbcReadJournal](sharedConfigPath + ".query")
 
   private val pubSub: Option[PubSub] =
     if (journalSettings.journalPublishEvents) Some(PubSub(system))
@@ -175,7 +186,7 @@ private[r2dbc] final class R2dbcJournal(config: Config, cfgPath: String) extends
     writeAndPublishResult.onComplete { _ =>
       self ! WriteFinished(persistenceId, writeAndPublishResult)
     }
-    writeAndPublishResult.map(_ => Nil)(ExecutionContext.parasitic)
+    writeAndPublishResult.map(_ => Nil)(ExecutionContexts.parasitic)
   }
 
   private def publish(messages: immutable.Seq[AtomicWrite], dbTimestamp: Future[Instant]): Future[Done] =
@@ -190,12 +201,12 @@ private[r2dbc] final class R2dbcJournal(config: Config, cfgPath: String) extends
         }
 
       case None =>
-        dbTimestamp.map(_ => Done)(ExecutionContext.parasitic)
+        dbTimestamp.map(_ => Done)(ExecutionContexts.parasitic)
     }
 
   override def asyncDeleteMessagesTo(persistenceId: String, toSequenceNr: Long): Future[Unit] = {
     log.debug("asyncDeleteMessagesTo persistenceId [{}], toSequenceNr [{}]", persistenceId, toSequenceNr)
-    journalDao.deleteMessagesTo(persistenceId, toSequenceNr)
+    journalDao.deleteEventsTo(persistenceId, toSequenceNr, resetSequenceNumber = false)
   }
 
   override def asyncReplayMessages(persistenceId: String, fromSequenceNr: Long, toSequenceNr: Long, max: Long)(
@@ -204,7 +215,7 @@ private[r2dbc] final class R2dbcJournal(config: Config, cfgPath: String) extends
     val effectiveToSequenceNr =
       if (max == Long.MaxValue) toSequenceNr
       else math.min(toSequenceNr, fromSequenceNr + max - 1)
-    journalDao
+    query
       .internalCurrentEventsByPersistenceId(persistenceId, fromSequenceNr, effectiveToSequenceNr)
       .runWith(Sink.foreach { row =>
         val repr = deserializeRow(serialization, row)
@@ -219,7 +230,7 @@ private[r2dbc] final class R2dbcJournal(config: Config, cfgPath: String) extends
       case Some(f) =>
         log.debug("Write in progress for [{}], deferring highest seq nr until write completed", persistenceId)
         // we only want to make write - replay sequential, not fail if previous write failed
-        f.recover { case _ => Done }(ExecutionContext.parasitic)
+        f.recover { case _ => Done }(ExecutionContexts.parasitic)
       case None => Future.successful(Done)
     }
     pendingWrite.flatMap(_ => journalDao.readHighestSequenceNr(persistenceId, fromSequenceNr))
