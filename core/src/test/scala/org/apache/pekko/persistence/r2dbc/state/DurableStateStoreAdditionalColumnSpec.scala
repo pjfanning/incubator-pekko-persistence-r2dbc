@@ -29,7 +29,7 @@ import org.scalatest.wordspec.AnyWordSpecLike
 object DurableStateStoreAdditionalColumnSpec {
   val config: Config = ConfigFactory
     .parseString(s"""
-    akka.persistence.r2dbc.state {
+    pekko.persistence.r2dbc.state {
       custom-table {
         "CustomEntity" = durable_state_test
       }

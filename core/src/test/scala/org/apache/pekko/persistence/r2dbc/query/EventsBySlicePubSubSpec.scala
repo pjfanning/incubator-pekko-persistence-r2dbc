@@ -49,7 +49,7 @@ import org.scalatest.wordspec.AnyWordSpecLike
 object EventsBySlicePubSubSpec {
   def config: Config = ConfigFactory
     .parseString("""
-    akka.persistence.r2dbc {
+    pekko.persistence.r2dbc {
       journal.publish-events = on
       #journal.publish-events-number-of-topics = 4
       journal.publish-events-dynamic {
@@ -60,7 +60,7 @@ object EventsBySlicePubSubSpec {
       # no events from database query, only via pub-sub
       query.behind-current-time = 5 minutes
     }
-    akka.actor.testkit.typed.filter-leeway = 20.seconds
+    pekko.actor.testkit.typed.filter-leeway = 20.seconds
     """)
     .withFallback(TestConfig.backtrackingDisabledConfig.withFallback(TestConfig.config))
 }
@@ -297,7 +297,7 @@ class EventsBySlicePubSubSpec
     "group slices into topics" in new Setup {
 
       val numberOfTopics =
-        typedSystem.settings.config.getInt("akka.persistence.r2dbc.journal.publish-events-number-of-topics")
+        typedSystem.settings.config.getInt("pekko.persistence.r2dbc.journal.publish-events-number-of-topics")
       //
       val querySliceRanges = Persistence(typedSystem).sliceRanges(numberOfTopics * 2)
       val queries: immutable.IndexedSeq[TestSubscriber.Probe[EventEnvelope[String]]] = {

@@ -54,7 +54,7 @@ abstract class AdditionalColumn[A, B: ClassTag] {
   /**
    * INTERNAL API: used when binding null
    */
-  @InternalApi private[akka] val fieldClass: Class[_] = {
+  @InternalApi private[pekko] val fieldClass: Class[_] = {
     val cls = implicitly[ClassTag[B]].runtimeClass
     scalaPrimitivesMapping.getOrElse(cls, cls)
   }

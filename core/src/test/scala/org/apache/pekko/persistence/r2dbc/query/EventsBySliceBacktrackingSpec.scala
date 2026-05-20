@@ -37,7 +37,7 @@ import org.slf4j.LoggerFactory
 object EventsBySliceBacktrackingSpec {
   private val config = ConfigFactory
     .parseString("""
-    akka.persistence.r2dbc.journal.publish-events = off
+    pekko.persistence.r2dbc.journal.publish-events = off
     """)
     .withFallback(TestConfig.config)
 }
@@ -50,7 +50,7 @@ class EventsBySliceBacktrackingSpec
     with LogCapturing {
 
   override def typedSystem: ActorSystem[_] = system
-  private val settings = new R2dbcSettings(system.settings.config.getConfig("akka.persistence.r2dbc"))
+  private val settings = new R2dbcSettings(system.settings.config.getConfig("pekko.persistence.r2dbc"))
   private implicit val journalPayloadCodec: PayloadCodec = settings.journalPayloadCodec
 
   private val query = PersistenceQuery(testKit.system)

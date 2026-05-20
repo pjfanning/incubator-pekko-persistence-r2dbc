@@ -26,7 +26,7 @@ class CurrentPersistenceIdsQuerySpec
     extends ScalaTestWithActorTestKit(
       ConfigFactory
         .parseString("""
-        akka.persistence.r2dbc.query.persistence-ids.buffer-size = 20
+        pekko.persistence.r2dbc.query.persistence-ids.buffer-size = 20
         """)
         .withFallback(TestConfig.config))
     with AnyWordSpecLike

@@ -23,7 +23,7 @@ import io.r2dbc.spi.Statement
 /**
  * INTERNAL API
  */
-@InternalApi private[akka] sealed trait PayloadCodec {
+@InternalApi private[pekko] sealed trait PayloadCodec {
   def payloadClass: Class[_]
   def encode(bytes: Array[Byte]): Any
   def decode(payload: Any): Array[Byte]
@@ -33,7 +33,7 @@ import io.r2dbc.spi.Statement
 /**
  * INTERNAL API
  */
-@InternalApi private[akka] object PayloadCodec {
+@InternalApi private[pekko] object PayloadCodec {
   case object ByteArrayCodec extends PayloadCodec {
     override def payloadClass: Class[Array[Byte]] = classOf[Array[Byte]]
     override def encode(bytes: Array[Byte]): Array[Byte] = bytes

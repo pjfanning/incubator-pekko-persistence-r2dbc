@@ -23,13 +23,13 @@ object MultiPluginSpec {
   val config: Config = ConfigFactory
     .parseString("""
     // #default-config
-    akka.persistence.journal.plugin = "akka.persistence.r2dbc.journal"
-    akka.persistence.snapshot-store.plugin = "akka.persistence.r2dbc.snapshot"
-    akka.persistence.state.plugin = "akka.persistence.r2dbc.state"
+    pekko.persistence.journal.plugin = "pekko.persistence.r2dbc.journal"
+    pekko.persistence.snapshot-store.plugin = "pekko.persistence.r2dbc.snapshot"
+    pekko.persistence.state.plugin = "pekko.persistence.r2dbc.state"
     // #default-config
 
     // #second-config
-    second-r2dbc = ${akka.persistence.r2dbc}
+    second-r2dbc = ${pekko.persistence.r2dbc}
     second-r2dbc {
       connection-factory {
         # specific connection properties here

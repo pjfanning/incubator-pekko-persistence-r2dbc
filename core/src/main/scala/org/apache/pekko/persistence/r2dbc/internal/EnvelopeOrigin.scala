@@ -20,7 +20,7 @@ import pekko.persistence.query.typed.EventEnvelope
 /**
  * INTERNAL API
  */
-@InternalStableApi private[akka] object EnvelopeOrigin {
+@InternalStableApi private[pekko] object EnvelopeOrigin {
   val SourceQuery = ""
   val SourceBacktracking = "BT"
   val SourcePubSub = "PS"

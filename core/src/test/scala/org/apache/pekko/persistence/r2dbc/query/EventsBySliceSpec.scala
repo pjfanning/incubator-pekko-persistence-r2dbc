@@ -49,13 +49,13 @@ object EventsBySliceSpec {
       .withFallback(ConfigFactory.parseString(s"""
     # This test is not using backtracking, so increase behind-current-time to
     # reduce risk of missing events
-    akka.persistence.r2dbc.query.behind-current-time = 500 millis
-    akka.persistence.r2dbc-small-buffer = $${akka.persistence.r2dbc}
+    pekko.persistence.r2dbc.query.behind-current-time = 500 millis
+    pekko.persistence.r2dbc-small-buffer = $${pekko.persistence.r2dbc}
 
-    akka.persistence.r2dbc.journal.publish-events = off
+    pekko.persistence.r2dbc.journal.publish-events = off
 
     # this is used by the "read in chunks" test
-    akka.persistence.r2dbc-small-buffer.query {
+    pekko.persistence.r2dbc-small-buffer.query {
       buffer-size = 4
       # for this extreme scenario it will add delay between each query for the live case
       refresh-interval = 20 millis
@@ -74,7 +74,7 @@ class EventsBySliceSpec
   import EventsBySliceSpec._
 
   override def typedSystem: ActorSystem[_] = system
-  private val settings = new R2dbcSettings(system.settings.config.getConfig("akka.persistence.r2dbc"))
+  private val settings = new R2dbcSettings(system.settings.config.getConfig("pekko.persistence.r2dbc"))
 
   private val query = PersistenceQuery(testKit.system).readJournalFor[R2dbcReadJournal](R2dbcReadJournal.Identifier)
 
@@ -154,7 +154,7 @@ class EventsBySliceSpec
 
       "read in chunks" in new Setup {
         val queryWithSmallBuffer = PersistenceQuery(testKit.system)
-          .readJournalFor[R2dbcReadJournal]("akka.persistence.r2dbc-small-buffer.query")
+          .readJournalFor[R2dbcReadJournal]("pekko.persistence.r2dbc-small-buffer.query")
         for (i <- 1 to 10; n <- 1 to 10 by 2) {
           persister ! PersistAll(List(s"e-$i-$n", s"e-$i-${n + 1}"))
         }

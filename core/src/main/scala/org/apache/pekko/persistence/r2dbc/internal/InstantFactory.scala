@@ -21,7 +21,7 @@ import pekko.annotation.InternalApi
 /**
  * INTERNAL API
  */
-@InternalApi private[akka] object InstantFactory {
+@InternalApi private[pekko] object InstantFactory {
 
   /**
    * Current time truncated to microseconds. The reason for using microseconds is that Postgres timestamps has the

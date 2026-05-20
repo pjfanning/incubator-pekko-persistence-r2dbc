@@ -27,7 +27,7 @@ class CurrentPersistenceIdsQuerySpec
     extends ScalaTestWithActorTestKit(
       ConfigFactory
         .parseString("""
-        akka.persistence.r2dbc {
+        pekko.persistence.r2dbc {
           query.persistence-ids.buffer-size = 20
           state {
             custom-table {

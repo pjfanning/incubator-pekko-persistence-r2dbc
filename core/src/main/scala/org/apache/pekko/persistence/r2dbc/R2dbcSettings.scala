@@ -49,7 +49,7 @@ final class R2dbcSettings(config: Config) {
     case "JSONB" | "JSON" => true
     case t                =>
       throw new IllegalStateException(
-        s"Expected akka.persistence.r2dbc.$prefix.payload-column-type to be one of 'BYTEA', 'JSON' or 'JSONB' but found '$t'")
+        s"Expected pekko.persistence.r2dbc.$prefix.payload-column-type to be one of 'BYTEA', 'JSON' or 'JSONB' but found '$t'")
   }
   val journalPayloadCodec: PayloadCodec =
     if (useJsonPayload("journal")) PayloadCodec.JsonCodec else PayloadCodec.ByteArrayCodec
@@ -74,7 +74,7 @@ final class R2dbcSettings(config: Config) {
   /**
    * INTERNAL API
    */
-  @InternalApi private[akka] val durableStateTableByEntityTypeWithSchema: Map[String, String] =
+  @InternalApi private[pekko] val durableStateTableByEntityTypeWithSchema: Map[String, String] =
     durableStateTableByEntityType.map { case (entityType, table) =>
       entityType -> (schema.map(_ + ".").getOrElse("") + table)
     }
@@ -93,7 +93,7 @@ final class R2dbcSettings(config: Config) {
   /**
    * INTERNAL API
    */
-  @InternalApi private[akka] val durableStateAdditionalColumnClasses: Map[String, immutable.IndexedSeq[String]] = {
+  @InternalApi private[pekko] val durableStateAdditionalColumnClasses: Map[String, immutable.IndexedSeq[String]] = {
     import pekko.util.ccompat.JavaConverters._
     val cfg = config.getConfig("state.additional-columns")
     cfg.root.unwrapped.asScala.toMap.map {
@@ -105,7 +105,7 @@ final class R2dbcSettings(config: Config) {
   /**
    * INTERNAL API
    */
-  @InternalApi private[akka] val durableStateChangeHandlerClasses: Map[String, String] =
+  @InternalApi private[pekko] val durableStateChangeHandlerClasses: Map[String, String] =
     configToMap(config.getConfig("state.change-handler"))
 
   val durableStateAssertSingleWriter: Boolean = config.getBoolean("state.assert-single-writer")
@@ -126,7 +126,7 @@ final class R2dbcSettings(config: Config) {
   /**
    * INTERNAL API FIXME remove when https://github.com/yugabyte/yugabyte-db/issues/10995 has been resolved
    */
-  @InternalApi private[akka] val useAppTimestamp: Boolean = config.getBoolean("use-app-timestamp")
+  @InternalApi private[pekko] val useAppTimestamp: Boolean = config.getBoolean("use-app-timestamp")
 
   val logDbCallsExceeding: FiniteDuration =
     config.getString("log-db-calls-exceeding").toLowerCase(Locale.ROOT) match {

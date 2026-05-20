@@ -45,8 +45,8 @@ object DurableStateBySliceSpec {
   def config: Config =
     TestConfig.backtrackingDisabledConfig
       .withFallback(ConfigFactory.parseString(s"""
-    akka.persistence.r2dbc-small-buffer = $${akka.persistence.r2dbc}
-    akka.persistence.r2dbc-small-buffer.query {
+    pekko.persistence.r2dbc-small-buffer = $${pekko.persistence.r2dbc}
+    pekko.persistence.r2dbc-small-buffer.query {
       buffer-size = 3
     }
     """))
@@ -63,7 +63,7 @@ class DurableStateBySliceSpec
   import DurableStateBySliceSpec._
 
   override def typedSystem: ActorSystem[_] = system
-  private val settings = new R2dbcSettings(system.settings.config.getConfig("akka.persistence.r2dbc"))
+  private val settings = new R2dbcSettings(system.settings.config.getConfig("pekko.persistence.r2dbc"))
 
   private val query = DurableStateStoreRegistry(testKit.system)
     .durableStateStoreFor[R2dbcDurableStateStore[String]](R2dbcDurableStateStore.Identifier)

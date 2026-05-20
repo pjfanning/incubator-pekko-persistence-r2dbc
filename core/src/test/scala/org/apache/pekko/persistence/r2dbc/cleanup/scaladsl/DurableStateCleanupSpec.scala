@@ -18,8 +18,8 @@ import org.scalatest.wordspec.AnyWordSpecLike
 object DurableStateCleanupSpec {
   val config = ConfigFactory
     .parseString(s"""
-    akka.loglevel = DEBUG
-    akka.persistence.r2dbc.cleanup {
+    pekko.loglevel = DEBUG
+    pekko.persistence.r2dbc.cleanup {
       log-progress-every = 2
     }
   """)

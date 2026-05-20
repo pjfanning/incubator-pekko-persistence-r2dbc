@@ -720,7 +720,7 @@ private[r2dbc] class DurableStateDao(settings: R2dbcSettings, connectionFactory:
   /**
    * INTERNAL API
    */
-  @InternalApi private[akka] def persistenceIds(
+  @InternalApi private[pekko] def persistenceIds(
       afterId: Option[String],
       limit: Long,
       table: String): Source[String, NotUsed] = {

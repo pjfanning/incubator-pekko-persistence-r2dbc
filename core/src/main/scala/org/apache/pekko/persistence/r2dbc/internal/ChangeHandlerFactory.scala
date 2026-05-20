@@ -29,7 +29,7 @@ import pekko.persistence.r2dbc.state.scaladsl.ChangeHandler
 /**
  * INTERNAL API
  */
-@InternalApi private[akka] object ChangeHandlerFactory {
+@InternalApi private[pekko] object ChangeHandlerFactory {
 
   /**
    * Adapter from javadsl.ChangeHandler to scaladsl.ChangeHandler
@@ -37,7 +37,7 @@ import pekko.persistence.r2dbc.state.scaladsl.ChangeHandler
   final class ChangeHandlerAdapter(delegate: javadsl.ChangeHandler[Any]) extends ChangeHandler[Any] {
     override def process(session: R2dbcSession, change: DurableStateChange[Any]): Future[Done] = {
       val javadslSession =
-        new akka.persistence.r2dbc.session.javadsl.R2dbcSession(session.connection)(session.ec, session.system)
+        new pekko.persistence.r2dbc.session.javadsl.R2dbcSession(session.connection)(session.ec, session.system)
       delegate.process(javadslSession, change).toScala
     }
   }
@@ -55,7 +55,7 @@ import pekko.persistence.r2dbc.state.scaladsl.ChangeHandler
               dynamicAccess
                 .createInstanceFor[ChangeHandler[Any]](
                   fqcn,
-                  List(classOf[akka.actor.ActorSystem] -> system.classicSystem))))
+                  List(classOf[pekko.actor.ActorSystem] -> system.classicSystem))))
     }
 
     def tryCreateJavadslInstance(): Try[javadsl.ChangeHandler[Any]] = {
@@ -68,7 +68,7 @@ import pekko.persistence.r2dbc.state.scaladsl.ChangeHandler
               dynamicAccess
                 .createInstanceFor[javadsl.ChangeHandler[Any]](
                   fqcn,
-                  List(classOf[akka.actor.ActorSystem] -> system.classicSystem))))
+                  List(classOf[pekko.actor.ActorSystem] -> system.classicSystem))))
     }
 
     def adapt(changeHandler: javadsl.ChangeHandler[Any]): ChangeHandler[Any] =

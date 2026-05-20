@@ -48,7 +48,7 @@ final class EventSourcedCleanup private (delegate: scaladsl.EventSourcedCleanup)
     this(new scaladsl.EventSourcedCleanup(systemProvider, configPath))
 
   def this(systemProvider: ClassicActorSystemProvider) =
-    this(systemProvider, "akka.persistence.r2dbc.cleanup")
+    this(systemProvider, "pekko.persistence.r2dbc.cleanup")
 
   /**
    * Delete all events before a sequenceNr for the given persistence id. Snapshots are not deleted.

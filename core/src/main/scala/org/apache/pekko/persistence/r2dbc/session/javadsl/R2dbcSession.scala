@@ -39,7 +39,7 @@ object R2dbcSession {
    * transaction is committed at the end or rolled back in case of failures.
    */
   def withSession[A](system: ActorSystem[_], fun: JFunction[R2dbcSession, CompletionStage[A]]): CompletionStage[A] = {
-    withSession(system, "akka.persistence.r2dbc.connection-factory", fun)
+    withSession(system, "pekko.persistence.r2dbc.connection-factory", fun)
   }
 
   def withSession[A](

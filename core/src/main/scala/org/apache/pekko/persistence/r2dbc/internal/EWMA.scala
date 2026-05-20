@@ -39,7 +39,7 @@ import pekko.annotation.InternalApi
  *   the current exponentially weighted moving average, e.g. Y(n - 1), or, the sampled value resulting from the previous
  *   smoothing iteration. This value is always used as the previous EWMA to calculate the new EWMA.
  */
-@InternalApi private[akka] final case class EWMA(value: Double, alpha: Double) {
+@InternalApi private[pekko] final case class EWMA(value: Double, alpha: Double) {
 
   require(0.0 <= alpha && alpha <= 1.0, "alpha must be between 0.0 and 1.0")
 
@@ -63,7 +63,7 @@ import pekko.annotation.InternalApi
 /**
  * INTERNAL API
  */
-@InternalApi private[akka] object EWMA {
+@InternalApi private[pekko] object EWMA {
 
   /**
    * math.log(2)

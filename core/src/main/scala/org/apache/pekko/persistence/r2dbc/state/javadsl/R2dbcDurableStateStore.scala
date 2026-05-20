@@ -86,7 +86,7 @@ class R2dbcDurableStateStore[A](scalaStore: ScalaR2dbcDurableStateStore[A])(impl
    *
    * Note: to reuse existing index, the actual query filters entity types based on persistence_id column and sql LIKE
    * operator. Hence the persistenceId must start with an entity type followed by default separator ("|") from
-   * [[akka.persistence.typed.PersistenceId]].
+   * [[pekko.persistence.typed.PersistenceId]].
    *
    * @param entityType
    *   The entity type name.

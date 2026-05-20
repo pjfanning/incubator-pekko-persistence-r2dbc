@@ -22,7 +22,7 @@ import org.scalatest.wordspec.AnyWordSpecLike
  * with JSONB the db schema should be created with `ddl-scripts/create_tables_postgres_jsonb.sql` and start `sbt` with
  *
  * {{{
- * sbt -Dakka.persistence.r2dbc.journal.payload-column-type=JSONB -Dakka.persistence.r2dbc.snapshot.payload-column-type=JSONB -Dakka.persistence.r2dbc.state.payload-column-type=JSONB
+ * sbt -Dpekko.persistence.r2dbc.journal.payload-column-type=JSONB -Dpekko.persistence.r2dbc.snapshot.payload-column-type=JSONB -Dpekko.persistence.r2dbc.state.payload-column-type=JSONB
  * }}}
  *
  * Note that other test may fail with JSONB column type because the test data isn't in json.
@@ -30,7 +30,7 @@ import org.scalatest.wordspec.AnyWordSpecLike
 object PayloadSpec {
   val config = ConfigFactory
     .parseString("""
-    akka.serialization.jackson.jackson-json.compression.algorithm = off
+    pekko.serialization.jackson.jackson-json.compression.algorithm = off
     """)
     .withFallback(TestConfig.config)
 
@@ -60,7 +60,7 @@ class PayloadSpec
   import PayloadSpec._
 
   override def typedSystem: ActorSystem[_] = system
-  private val settings = new R2dbcSettings(system.settings.config.getConfig("akka.persistence.r2dbc"))
+  private val settings = new R2dbcSettings(system.settings.config.getConfig("pekko.persistence.r2dbc"))
 
   private def testJournalPersister(persistenceId: String, msg: Any): Unit = {
     val probe = createTestProbe[Any]()

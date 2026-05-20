@@ -37,7 +37,7 @@ import org.slf4j.LoggerFactory
 /**
  * INTERNAL API
  */
-@InternalApi private[akka] object PubSub extends ExtensionId[PubSub] {
+@InternalApi private[pekko] object PubSub extends ExtensionId[PubSub] {
   private val log = LoggerFactory.getLogger(classOf[PubSub])
 
   def createExtension(system: ActorSystem[_]): PubSub = new PubSub(system)
@@ -50,17 +50,17 @@ import org.slf4j.LoggerFactory
 /**
  * INTERNAL API
  */
-@InternalApi private[akka] class PubSub(system: ActorSystem[_]) extends Extension {
+@InternalApi private[pekko] class PubSub(system: ActorSystem[_]) extends Extension {
   import PubSub.log
 
   private val topics = new ConcurrentHashMap[String, ActorRef[Any]]
   private val persistenceExt = Persistence(system)
 
   private val settings = new PublishEventsDynamicSettings(
-    system.settings.config.getConfig("akka.persistence.r2dbc.journal.publish-events-dynamic"))
+    system.settings.config.getConfig("pekko.persistence.r2dbc.journal.publish-events-dynamic"))
 
   private val sliceRanges = {
-    val numberOfTopics = system.settings.config.getInt("akka.persistence.r2dbc.journal.publish-events-number-of-topics")
+    val numberOfTopics = system.settings.config.getInt("pekko.persistence.r2dbc.journal.publish-events-number-of-topics")
     persistenceExt.sliceRanges(numberOfTopics)
   }
   private val sliceRangeLookup = new ConcurrentHashMap[Int, Range]

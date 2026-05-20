@@ -43,7 +43,7 @@ import com.typesafe.config.Config
 import org.slf4j.LoggerFactory
 
 object R2dbcDurableStateStore {
-  val Identifier = "akka.persistence.r2dbc.state"
+  val Identifier = "pekko.persistence.r2dbc.state"
 
   private final case class PersistenceIdsQueryState(
       queryCount: Int,
@@ -188,7 +188,7 @@ class R2dbcDurableStateStore[A](system: ExtendedActorSystem, config: Config, cfg
    *
    * Note: to reuse existing index, the actual query filters entity types based on persistence_id column and sql LIKE
    * operator. Hence the persistenceId must start with an entity type followed by default separator ("|") from
-   * [[akka.persistence.typed.PersistenceId]].
+   * [[pekko.persistence.typed.PersistenceId]].
    *
    * @param entityType
    *   The entity type name.

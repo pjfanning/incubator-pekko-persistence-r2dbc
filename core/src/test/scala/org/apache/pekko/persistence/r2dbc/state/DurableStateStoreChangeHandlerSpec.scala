@@ -32,7 +32,7 @@ import org.scalatest.wordspec.AnyWordSpecLike
 object DurableStateStoreChangeHandlerSpec {
   val config: Config = ConfigFactory
     .parseString(s"""
-    akka.persistence.r2dbc.state {
+    pekko.persistence.r2dbc.state {
       change-handler {
         "CustomEntity" = "${classOf[Handler].getName}"
         "JavadslCustomEntity" = "${classOf[JavadslChangeHandler].getName}"

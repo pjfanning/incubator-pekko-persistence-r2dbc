@@ -18,7 +18,7 @@ trait TestDbLifecycle extends BeforeAndAfterAll { this: Suite =>
 
   def typedSystem: ActorSystem[_]
 
-  def testConfigPath: String = "akka.persistence.r2dbc"
+  def testConfigPath: String = "pekko.persistence.r2dbc"
 
   lazy val r2dbcSettings: R2dbcSettings =
     new R2dbcSettings(typedSystem.settings.config.getConfig(testConfigPath))

@@ -46,7 +46,7 @@ final class DurableStateCleanup private (delegate: scaladsl.DurableStateCleanup)
     this(new scaladsl.DurableStateCleanup(systemProvider, configPath))
 
   def this(systemProvider: ClassicActorSystemProvider) =
-    this(systemProvider, "akka.persistence.r2dbc.cleanup")
+    this(systemProvider, "pekko.persistence.r2dbc.cleanup")
 
   /**
    * Delete the state related to one single `persistenceId`.

@@ -18,15 +18,15 @@ object R2dbcJournalSpec {
 
   def configWithMeta =
     ConfigFactory
-      .parseString("""akka.persistence.r2dbc.with-meta = true""")
+      .parseString("""pekko.persistence.r2dbc.with-meta = true""")
       .withFallback(R2dbcJournalSpec.testConfig())
 
   def testConfig(): Config = {
     ConfigFactory
       .parseString(s"""
       # allow java serialization when testing
-      akka.actor.allow-java-serialization = on
-      akka.actor.warn-about-java-serializer-usage = off
+      pekko.actor.allow-java-serialization = on
+      pekko.actor.warn-about-java-serializer-usage = off
       """)
       .withFallback(TestConfig.config)
   }

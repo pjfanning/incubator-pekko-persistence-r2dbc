@@ -42,7 +42,7 @@ object TestDataGenerator {
   def main(args: Array[String]): Unit = {
     val config = ConfigFactory
       .parseString("""
-      akka.persistence.r2dbc {
+      pekko.persistence.r2dbc {
         journal.table = test_journal
       }
       """)

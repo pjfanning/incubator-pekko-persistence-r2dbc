@@ -25,14 +25,14 @@ import pekko.persistence.r2dbc.state.javadsl
 /**
  * INTERNAL API
  */
-@InternalApi private[akka] object AdditionalColumnFactory {
+@InternalApi private[pekko] object AdditionalColumnFactory {
 
   /**
    * Adapter from javadsl.AdditionColumn to scaladsl.AdditionalColumn
    */
   final class AdditionColumnAdapter(delegate: javadsl.AdditionalColumn[Any, Any]) extends AdditionalColumn[Any, Any] {
 
-    override private[akka] val fieldClass: Class[_] =
+    override private[pekko] val fieldClass: Class[_] =
       delegate.fieldClass
 
     override def columnName: String =

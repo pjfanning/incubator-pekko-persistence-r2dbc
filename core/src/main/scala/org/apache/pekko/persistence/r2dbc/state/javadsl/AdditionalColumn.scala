@@ -31,17 +31,17 @@ object AdditionalColumn {
   /**
    * INTERNAL API
    */
-  @InternalApi private[akka] final class BindValue[B](val value: B) extends Binding[B]
+  @InternalApi private[pekko] final class BindValue[B](val value: B) extends Binding[B]
 
   /**
    * INTERNAL API
    */
-  @InternalApi private[akka] case object BindNull extends Binding[Nothing]
+  @InternalApi private[pekko] case object BindNull extends Binding[Nothing]
 
   /**
    * INTERNAL API
    */
-  @InternalApi private[akka] case object Skip extends Binding[Nothing]
+  @InternalApi private[pekko] case object Skip extends Binding[Nothing]
 
 }
 

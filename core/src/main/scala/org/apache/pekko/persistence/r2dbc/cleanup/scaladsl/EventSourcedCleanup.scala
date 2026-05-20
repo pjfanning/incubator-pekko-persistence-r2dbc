@@ -50,12 +50,12 @@ import org.slf4j.LoggerFactory
 final class EventSourcedCleanup(systemProvider: ClassicActorSystemProvider, configPath: String) {
 
   def this(systemProvider: ClassicActorSystemProvider) =
-    this(systemProvider, "akka.persistence.r2dbc.cleanup")
+    this(systemProvider, "pekko.persistence.r2dbc.cleanup")
 
   /**
    * INTERNAL API
    */
-  @InternalApi private[akka] implicit val system: ActorSystem[_] = {
+  @InternalApi private[pekko] implicit val system: ActorSystem[_] = {
     import pekko.actor.typed.scaladsl.adapter._
     systemProvider.classicSystem.toTyped
   }

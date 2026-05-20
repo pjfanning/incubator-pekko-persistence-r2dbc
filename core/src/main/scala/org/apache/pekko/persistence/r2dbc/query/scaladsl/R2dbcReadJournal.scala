@@ -56,7 +56,7 @@ import com.typesafe.config.Config
 import org.slf4j.LoggerFactory
 
 object R2dbcReadJournal {
-  val Identifier = "akka.persistence.r2dbc.query"
+  val Identifier = "pekko.persistence.r2dbc.query"
 
   private final case class ByPersistenceIdState(queryCount: Int, rowCount: Int, latestSeqNr: Long)
 
@@ -207,7 +207,7 @@ final class R2dbcReadJournal(system: ExtendedActorSystem, config: Config, cfgPat
   /**
    * INTERNAL API
    */
-  @InternalApi private[akka] def deduplicate[Event](
+  @InternalApi private[pekko] def deduplicate[Event](
       capacity: Int): Flow[EventEnvelope[Event], EventEnvelope[Event], NotUsed] = {
     if (capacity == 0)
       Flow[EventEnvelope[Event]]
@@ -247,7 +247,7 @@ final class R2dbcReadJournal(system: ExtendedActorSystem, config: Config, cfgPat
   /**
    * INTERNAL API
    */
-  @InternalApi private[akka] def skipPubSubTooFarAhead[Event](
+  @InternalApi private[pekko] def skipPubSubTooFarAhead[Event](
       enabled: Boolean,
       maxAheadOfBacktracking: JDuration): Flow[EventEnvelope[Event], EventEnvelope[Event], NotUsed] = {
     if (!enabled)
@@ -500,7 +500,7 @@ final class R2dbcReadJournal(system: ExtendedActorSystem, config: Config, cfgPat
    *
    * Note: to reuse existing index, the actual query filters entity types based on persistence_id column and sql LIKE
    * operator. Hence the persistenceId must start with an entity type followed by default separator ("|") from
-   * [[akka.persistence.typed.PersistenceId]].
+   * [[pekko.persistence.typed.PersistenceId]].
    *
    * @param entityType
    *   The entity type name.

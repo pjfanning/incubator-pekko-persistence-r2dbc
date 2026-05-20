@@ -31,14 +31,14 @@ import org.scalatest.wordspec.AnyWordSpecLike
 object EventsBySlicePerfSpec {
   private val config = ConfigFactory
     .parseString("""
-    akka.persistence.r2dbc.journal.publish-events = on
-    akka.persistence.r2dbc.query {
+    pekko.persistence.r2dbc.journal.publish-events = on
+    pekko.persistence.r2dbc.query {
       backtracking.enabled = on
       refresh-interval = 3s
       #buffer-size = 100
     }
     # to measure lag latency more accurately
-    akka.persistence.r2dbc.use-app-timestamp = true
+    pekko.persistence.r2dbc.use-app-timestamp = true
     """)
     .withFallback(TestConfig.config)
 

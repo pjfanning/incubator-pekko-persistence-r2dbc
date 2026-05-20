@@ -22,8 +22,8 @@ import org.slf4j.event.Level
 object EventSourcedCleanupSpec {
   val config = ConfigFactory
     .parseString(s"""
-    akka.loglevel = DEBUG
-    akka.persistence.r2dbc.cleanup {
+    pekko.loglevel = DEBUG
+    pekko.persistence.r2dbc.cleanup {
       log-progress-every = 2
       events-journal-delete-batch-size = 10
     }
